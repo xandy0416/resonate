@@ -1,0 +1,81 @@
+/*  · genre: atmospheric · macrostructure: Marquee Hero · theme: Midnight
+ * anchor hue: 45 (warm orange) · accent-2 hue: 12 (pink/red bloom)
+ * display: Tomorrow · body: Geist · outlier: Geist Mono
+ * 这是本项目的设计系统唯一来源；页面 CSS 一律引用以下命名 token，禁止内联裸值。
+ */
+
+:root {
+  /* ── 颜色 · Midnight 暗色画布，暖色锚点 ── */
+  --color-paper:    oklch(14% 0.008 45);
+  --color-paper-2:  oklch(18% 0.010 45);   /* 抬升卡片 */
+  --color-paper-3:  oklch(22% 0.012 45);   /* 更高抬升 / hover */
+  --color-rule:     oklch(30% 0.008 45);   /* 弱分隔 */
+  --color-rule-2:   oklch(40% 0.010 45);   /* 输入框/卡片描边 */
+  --color-neutral:  oklch(62% 0.010 45);   /* 次级文字 */
+  --color-muted:    oklch(74% 0.008 45);   /* 辅助文字 */
+  --color-ink:      oklch(95% 0.006 80);   /* 主文字（非纯白） */
+
+  --color-accent:   oklch(72% 0.17 45);    /* 暖橙主强调 */
+  --color-accent-2: oklch(66% 0.18 12);    /* 次级粉红 bloom */
+  --color-accent-ink: oklch(16% 0.03 45);  /* 强调底色上的文字 */
+  --color-focus:    oklch(80% 0.16 75);    /* 焦点环（暗底可见） */
+  --color-error:    oklch(66% 0.19 25);
+  --color-success:  oklch(80% 0.15 150);
+
+  /* ── 阴影 / 遮罩（暖色深调，避免纯黑死板） ── */
+  --color-shadow:   oklch(8% 0.012 45 / 0.55);
+  --color-scrim:    oklch(7% 0.012 45 / 0.62);
+
+  /* ── 字体 ── */
+  --font-display: "Tomorrow", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* ── 间距（4pt 尺度） ── */
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs:  0.5rem;
+  --space-sm:  0.75rem;
+  --space-md:  1rem;
+  --space-lg:  1.5rem;
+  --space-xl:  2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+
+  /* ── 字号（1.25 比例） ── */
+  --text-xs:   0.8rem;
+  --text-sm:   0.9rem;
+  --text-base: 1rem;
+  --text-md:   1.25rem;
+  --text-lg:   1.5625rem;
+  --text-xl:   1.9531rem;
+  --text-2xl:  2.4414rem;
+  --text-display: clamp(2.5rem, 5vw + 1rem, 4.5rem);
+
+  /* ── 圆角 ── */
+  --radius-sm:  8px;
+  --radius-md:  14px;
+  --radius-lg:  22px;
+  --radius-pill: 999px;
+
+  /* ── 缓动 / 时长 ── */
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:    cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out:cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro:  120ms;
+  --dur-short:  200ms;
+  --dur-long:   420ms;
+
+  /* ── 层级 ── */
+  --z-base:    1;
+  --z-raised:  10;
+  --z-dropdown:100;
+  --z-sticky:  200;
+  --z-modal:   400;
+  --z-toast:   500;
+  --z-tooltip: 600;
+
+  /* ── 描边 / 版心 ── */
+  --rule-hair: 1px;
+  --page-gutter: clamp(1rem, 4vw, 3rem);
+}
