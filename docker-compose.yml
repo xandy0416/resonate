@@ -1,15 +1,13 @@
 # 飞牛 fnOS（Docker）部署配置
-# 用法（在 NAS 上本项目目录内）：
-#   sudo docker compose up -d --build      # 首次：本地构建
-#   sudo docker compose up -d              # 之后：直接起
-# 或改用下方已构建好的多架构镜像（CI 自动推到 GHCR，任何人可拉）：
-#   image: ghcr.io/xandy0416/resonate:latest
-#   （把上面的 build: . 整行删掉，改用 image 那行）
+# 默认使用已构建好的多架构镜像（CI 自动推到 GHCR，任何人可拉）：
+#   sudo docker compose up -d              # 直接拉镜像并启动
+# 若需本地构建（需 git clone 完整仓库，含 Dockerfile）：
+#   sudo docker compose up -d --build      # 把下方 image 行注释掉、改用 build: .
 
 services:
   resonate:
-    build: .
-    # image: ghcr.io/xandy0416/resonate:latest
+    # build: .
+    image: ghcr.io/xandy0416/resonate:latest
     container_name: resonate
     ports:
       - "9982:8787"
