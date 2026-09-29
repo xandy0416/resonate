@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import { Readable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { adapters, adapterMap, listPlatforms } from './adapters/index.js';
 import { solaraAdapter, resolveFlac } from './adapters/solara.js';
 import { neteaseAdapter } from './adapters/netease.js';
@@ -282,6 +285,19 @@ async function pipeMedia(req, res, asAttachment) {
   } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: '代理失败：' + e.message });
   }
+}
+
+// —— 生产形态：同端口托管前端静态产物 ——
+// 部署 / Docker 时 client/dist 已存在，则直接由本服务同时提供 SPA 与 /api；
+// 本地 dev（无 dist）时此分支不生效，仍走 Vite dev server + 代理，互不影响。
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const clientDist = join(__dirname, '..', 'client', 'dist');
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  // SPA 兜底：非 /api 的请求统一返回 index.html（支撑前端客户端路由）
+  app.get(/^(?!\/api\/).*/, (_req, res) => {
+    res.sendFile(join(clientDist, 'index.html'));
+  });
 }
 
 app.listen(PORT, () => {

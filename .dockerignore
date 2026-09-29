@@ -1,0 +1,31 @@
+# 依赖与构建产物（镜像内会重新安装 / 重新构建）
+node_modules
+**/node_modules
+dist
+**/dist
+
+# 版本控制与 CI
+.git
+.github
+
+# 本地敏感 / 登录态（勿打进镜像；运行时通过 bind-mount 注入）
+.env
+server/.env
+server/.netease_login_qr.png
+
+# 本地 AI 工具目录与备份（含敏感信息，绝不可进镜像）
+.workbuddy
+.hallmark
+音乐聚合解析管理_*/
+
+# 临时调试脚本与测试截图
+server/_*.mjs
+server/_*.html
+*.png
+_*.png
+*.log
+
+# 镜像自身相关
+Dockerfile
+.dockerignore
+docker-compose.yml
