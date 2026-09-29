@@ -1,5 +1,5 @@
 # 飞牛 fnOS（Docker）部署配置
-# 默认使用已构建好的多架构镜像（CI 自动推到 GHCR，任何人可拉）：
+# 默认使用已构建好的多架构镜像（国内镜像源，拉取更快）：
 #   sudo docker compose up -d              # 直接拉镜像并启动
 # 若需本地构建（需 git clone 完整仓库，含 Dockerfile）：
 #   sudo docker compose up -d --build      # 把下方 image 行注释掉、改用 build: .
@@ -7,7 +7,7 @@
 services:
   resonate:
     # build: .
-    image: ghcr.io/xandy0416/resonate:latest
+    image: crpi-279qcm0u4zya3ofn.cn-hangzhou.personal.cr.aliyuncs.com/xandy0416/resonate:latest
     container_name: resonate
     ports:
       - "9982:8787"
