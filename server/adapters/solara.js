@@ -18,9 +18,10 @@
 import { neteaseAdapter } from './netease.js';
 
 const SOLARA_BASE = 'https://music-api.gdstudio.xyz/api.php';
-const SONG_SOURCES = ['netease', 'joox', 'bilibili'];
 
-// —— 请求工具（带超时 + 一次重试） ─────────────────────────────────────────
+// —— 请求工具（带超时，不重试） ───────────────────────────────────────────
+// 注：Solara 上游限流时，重试只会把「单次阻塞」翻倍放大（最坏 15s×2=30s/请求），
+// 对可用性毫无帮助。故改为「单次短超时、不重试」，快速失败交由上层降级/兜底。
 function solaraUrl(params) {
   const u = new URL(SOLARA_BASE);
   for (const [k, v] of Object.entries(params)) {
@@ -29,24 +30,21 @@ function solaraUrl(params) {
   return u.toString();
 }
 
-async function solaraGet(params, timeoutMs = 12000) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const r = await fetch(solaraUrl(params), {
-        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
-        signal: ctrl.signal,
-      });
-      const text = await r.text();
-      try { return JSON.parse(text); } catch { return null; }
-    } catch {
-      // 超时或网络错 → 重试一次
-    } finally {
-      clearTimeout(timer);
-    }
+async function solaraGet(params, timeoutMs = 6000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(solaraUrl(params), {
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+      signal: ctrl.signal,
+    });
+    const text = await r.text();
+    try { return JSON.parse(text); } catch { return null; }
+  } catch {
+    return null; // 超时或网络错 → 返回 null，由上层降级
+  } finally {
+    clearTimeout(timer);
   }
-  return null;
 }
 
 // —— 归一化 / 去重 ─────────────────────────────────────────────────────────
@@ -61,106 +59,28 @@ function uniqKey(name, artist) {
   return norm(name) + '|' + a.map((x) => norm(x)).filter(Boolean).sort().join(',');
 }
 
-// 封面：pic 接口（netease 体系）
-async function picUrl(picId) {
-  if (!picId) return '';
-  const d = await solaraGet({ types: 'pic', source: 'netease', id: String(picId) }, 8000);
-  return (d && d.url) || '';
+// 提取“核心歌名”：先去掉括号及其内容（如 (Live)/(伴奏)）、再去掉尾部常见版本词
+// （live/acoustic/remix/伴奏/现场…），最后 norm。例：如果你是我的传说(Live) → 如果你是我的传说
+// 这一步专门解决“按名回查时，曲库版本标记差异导致全匹配失败”的问题。
+function coreTitle(s) {
+  let x = String(s || '');
+  x = x.replace(/[\(\[（【][^\)\]）】]*[\)\]）】]/g, ' '); // 去掉所有括号内容
+  x = x.replace(
+    /\b(live|acoustic|demo|remix|clean|radio|album|single|ost|instrumental|伴奏|现场|原唱|翻唱|原版|版)\b/gi,
+    ' '
+  );
+  return norm(x);
 }
 
-function mapSolaraSong(raw, src) {
-  const artist = Array.isArray(raw.artist) ? raw.artist.join('/') : String(raw.artist || '');
-  return {
-    id: String(raw.id),
-    platform: 'solara',
-    title: raw.name || '',
-    artist,
-    album: raw.album || '',
-    duration: raw.duration || 0,
-    cover: '',
-    size: null,
-    format: null,
-    br: null,
-    src, // 原始音源（播放/下载直链用）
-    _picId: raw.pic_id || '', // 临时：用于批量取封面，返回前删除
-  };
-}
-
-// 在 Solara 的 netease 源里回查某首歌的 netease id，用于把 joox/bilibili
-// 独有曲目也对齐到可下载的 netease 直链。
-async function neteaseIdFor(name, artist) {
-  const data = await solaraGet(
-    { types: 'search', source: 'netease', name, count: '5', pages: '1' },
-    8000
-  );
-  if (!Array.isArray(data)) return null;
-  const qn = norm(name);
-  const qa = String(artist || '').split('/').map(norm).filter(Boolean);
-  for (const c of data) {
-    const cn = norm(c.name || '');
-    if (!qn || qn !== cn) continue; // 歌名严格相等才认可
-    const ca = (Array.isArray(c.artist) ? c.artist : []).map(norm).filter(Boolean);
-    const artistOk =
-      qa.length === 0 ||
-      ca.length === 0 ||
-      qa.some((x) => ca.includes(x)) ||
-      ca.some((x) => qa.some((y) => y.length >= 3 && (x.includes(y) || y.includes(x))));
-    if (artistOk) return String(c.id);
+// 歌名相似度打分：3=完全相等；2=互为前缀（处理 (Live) 等后缀差异）；1=子串包含；0=不相关
+function nameScore(qn, cn) {
+  if (!qn || !cn) return 0;
+  if (qn === cn) return 3;
+  if (qn.length >= 4 && cn.length >= 4) {
+    if (cn.startsWith(qn) || qn.startsWith(cn)) return 2;
+    if (cn.includes(qn) || qn.includes(cn)) return 1;
   }
-  return null;
-}
-
-async function searchSongs(keywords, limit = 30) {
-  const settled = await Promise.allSettled(
-    SONG_SOURCES.map((src) =>
-      solaraGet({ types: 'search', source: src, name: keywords, count: String(limit), pages: '1' })
-    )
-  );
-  const seen = new Map(); // uniqKey -> song（优先 netease）
-  for (let i = 0; i < settled.length; i++) {
-    const src = SONG_SOURCES[i];
-    const data = settled[i].status === 'fulfilled' ? settled[i].value : null;
-    if (!Array.isArray(data)) continue;
-    for (const raw of data) {
-      if (!raw || !raw.id || !raw.name) continue;
-      const song = mapSolaraSong(raw, src);
-      const key = uniqKey(song.title, song.artist);
-      const existing = seen.get(key);
-      if (!existing || (existing.src !== 'netease' && src === 'netease')) {
-        seen.set(key, song);
-      }
-    }
-  }
-
-  let songs = [...seen.values()].slice(0, limit);
-
-  // 把 joox/bilibili 独有曲目尽力对齐到 netease id，确保可下载完整音轨
-  const toRemap = songs.filter((s) => s.src !== 'netease');
-  await Promise.all(
-    toRemap.map(async (s) => {
-      try {
-        const nid = await neteaseIdFor(s.title, s.artist);
-        if (nid) {
-          s.id = nid;
-          s.src = 'netease';
-        }
-      } catch { /* 忽略 */ }
-    })
-  );
-
-  // 批量补封面（按 pic_id 去重）
-  const picIds = [...new Set(songs.map((s) => s._picId).filter(Boolean))];
-  const coverMap = {};
-  await Promise.all(
-    picIds.map(async (pid) => {
-      coverMap[pid] = await picUrl(pid);
-    })
-  );
-  for (const s of songs) {
-    if (s._picId) s.cover = coverMap[s._picId] || '';
-    delete s._picId;
-  }
-  return songs;
+  return 0;
 }
 
 // 把 netease 适配器返回的结果重新标 platform='solara'
@@ -174,7 +94,8 @@ function remapPlatform(list, setSrc) {
 
 async function delegateSearch(keywords, type) {
   const r = await neteaseAdapter.search(keywords, type);
-  // 单曲也来自 netease（Solara 单曲搜索已单独提供，这里避免重复），故只取其余三类
+  // Solara 不再搜单曲（已删除 joox/bilibili 慢源，单曲完全由后端并行的网易云直连覆盖），
+  // 故此处只取歌手 / 专辑 / 歌单三类返回给上层。
   return {
     playlists: remapPlatform(r.playlists),
     artists: remapPlatform(r.artists),
@@ -197,7 +118,10 @@ async function playlistDetail(id) {
 // 直链：统一用 netease 源（可靠完整音轨，免登录）
 async function songUrl(id, src) {
   const source = src && src !== 'netease' ? src : 'netease';
-  const d = await solaraGet({ types: 'url', source, id: String(id) }, 15000);
+  // Solara 的 types=url 能给出 FLAC（br 900+），优先使用；
+  // 仅当 Solara 抖动/超时，才回退到「网易云直连接口」拿 MP3，保证歌曲可用（而非被丢弃）。
+  // 超时从 15s 收紧到 6s（不重试），限流时快速失败转回退，避免单首阻塞 30s。
+  const d = await solaraGet({ types: 'url', source, id: String(id) }, 6000);
   if (d && d.url) {
     const url = d.url;
     const size = d.size || null;
@@ -209,6 +133,16 @@ async function songUrl(id, src) {
     else if (typeof d.br === 'number' && d.br >= 700) format = 'FLAC';
     const br = typeof d.br === 'number' && d.br > 1 ? Math.round(d.br / 1000) : null;
     return { url, size, br, format };
+  }
+  // 回退：网易云直连接口（快且稳，不经 Solara 跳板），多数情况给 320kbps MP3。
+  if (source === 'netease') {
+    try {
+      const ne = await neteaseAdapter.songUrl(String(id));
+      if (ne && ne.url) {
+        const neFormat = ne.format && /flac/i.test(ne.format) ? 'FLAC' : 'MP3';
+        return { url: ne.url, size: ne.size ?? null, br: ne.br ?? null, format: neFormat };
+      }
+    } catch { /* 忽略，返回 null */ }
   }
   return null;
 }
@@ -229,8 +163,9 @@ async function mapWithConcurrency(items, worker, concurrency = 8) {
 }
 
 // 把一批单曲（可能来自网易云 / Solara 多源发现）统一解析为 Solara 的 netease
-// 完整直链，并【只保留能拿到 FLAC 的】，附上 size / format / br。
-// 这是“全部返回 FLAC 高质量”的核心：发现层与音频层在此汇合。
+// 完整直链（免登录）。【FLAC 优先：直链本就按曲库最高音质返回（无损给 FLAC、
+// 标准版给 MP3），故“无 FLAC 自动降级为下一级 MP3”由直链自然满足】。
+// 附上 size / format / br，并标记 flac（是否无损）与 resolved（是否拿到直链）。
 export async function resolveFlac(songs, limit = 40) {
   const seen = new Set();
   const unique = [];
@@ -242,63 +177,116 @@ export async function resolveFlac(songs, limit = 40) {
     unique.push(s);
   }
   const capped = unique.slice(0, limit);
+  // 整体截止：上游限流时避免长尾拖死整次搜索。超时的歌直接返回 null
+  // （format 为空，前端显示「暂无音源」并可点击重试），不再无限等待。
+  const deadline = Date.now() + 10000;
   const resolved = await mapWithConcurrency(capped, async (s) => {
+    if (Date.now() > deadline) return null;
     try {
-      const info = await songUrl(String(s.id), 'netease');
-      if (!info || !info.url || info.format !== 'FLAC') return null;
+      let info = await songUrl(String(s.id), s.src || 'netease');
+      // 带 (Live)/(翻唱版)/(伴奏) 等版本后缀的歌，用 netease id 在 Solara 取直链常失败；
+      // 回退到「核心歌名 + 歌手」回查（复用 coreTitle/nameScore 分级匹配），
+      // 让「如果你是我的传说(Live)」这类也能解析出直链，而非被过滤掉。
+      if (!info || !info.url) {
+        if (Date.now() > deadline) return null;
+        const alt = await resolveByName(coreTitle(s.title || ''), s.artist);
+        if (alt && alt.id) info = await songUrl(String(alt.id), 'netease');
+      }
+      if (!info || !info.url) return null;
       return {
         ...s,
         platform: 'solara',
         src: 'netease',
         size: info.size,
-        format: 'FLAC',
+        format: info.format,
         br: info.br,
-        flac: true,
+        flac: info.format === 'FLAC',
+        resolved: true,
         fromPlatform: s.platform || 'netease',
       };
     } catch {
       return null;
     }
-  });
+  }, 16);
   return resolved.filter(Boolean);
 }
 
-// 按“歌名 + 歌手”在 Solara 的 netease 源里回查并解析 FLAC，
+// 按“歌名 + 歌手”在 Solara 的 netease 源里回查并解析音频直链，
 // 用于汽水歌单等【没有平台曲目 id】的场景（只能靠名回查）。
+// 同样：FLAC 优先，无 FLAC 自动接受 MP3 降级；返回实际 format / flac 标记。
+//
+// 名称匹配采用【分级相似度】而非全等：先对曲库候选做核心歌名匹配
+// （去掉 (Live)/(伴奏) 等版本后缀），从而让「如果你是我的传说(Live)」也能命中
+// 「如果你是我的传说」。歌手需同时命中，避免同名错配。
 export async function resolveByName(name, artist) {
   const qn = norm(name);
+  const qc = coreTitle(name); // 去版本后缀的核心歌名
   const qa = String(artist || '').split('/').map(norm).filter(Boolean);
-  const data = await solaraGet({ types: 'search', source: 'netease', name, count: '5', pages: '1' }, 8000);
-  if (!Array.isArray(data)) return null;
+  let data = await solaraGet({ types: 'search', source: 'netease', name, count: '10', pages: '1' }, 6000);
+  if (!Array.isArray(data)) data = [];
+
+  // 兜底链路：Solara 抖动/限流时（data 为空），改用「网易云直连接口」按名找候选。
+  // 该接口不依赖 Solara（实测快且稳），可避免上游一挂就「整张列表全灰」；
+  // 找到的仍是网易云 id，交给 songUrl 时优先试 Solara 拿 FLAC、失败再退直连 MP3。
+  if (!data.length) {
+    try {
+      const ne = await neteaseAdapter.search(name, 'song', 30);
+      const list = (ne && ne.songs) || [];
+      if (list.length) {
+        data = list.map((x) => ({
+          id: x.id,
+          name: x.title,
+          artist: Array.isArray(x.artist) ? x.artist : String(x.artist || '').split('/'),
+        }));
+      }
+    } catch {
+      /* 忽略：下方统一返回 null */
+    }
+  }
+  if (!data.length) return null;
+
   let best = null;
+  let bestScore = 0; // 越高越优
   for (const c of data) {
     const cn = norm(c.name || '');
-    if (qn && qn !== cn) continue;
+    const cc = coreTitle(c.name || '');
+    // 完整名相似度 与 核心名相似度 取较高者（核心名匹配可解决版本后缀差异）
+    const score = Math.max(nameScore(qn, cn), nameScore(qc, cc));
+    if (score <= 0) continue;
     const ca = (Array.isArray(c.artist) ? c.artist : []).map(norm).filter(Boolean);
-    const ok =
+    const artistOk =
       qa.length === 0 ||
       ca.length === 0 ||
       qa.some((x) => ca.includes(x)) ||
       ca.some((x) => qa.some((y) => y.length >= 3 && (x.includes(y) || y.includes(x))));
-    if (ok) { best = c; break; }
+    if (!artistOk) continue; // 歌手须同时命中，避免同名错配
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+    if (bestScore === 3) break; // 已是精确匹配，无需继续
   }
   if (!best) return null;
   const info = await songUrl(String(best.id), 'netease');
-  if (!info || info.format !== 'FLAC') return null;
-  return { id: String(best.id), size: info.size, format: 'FLAC', br: info.br };
+  if (!info || !info.url) return null;
+  return {
+    id: String(best.id),
+    size: info.size,
+    format: info.format || 'MP3',
+    br: info.br,
+    flac: info.format === 'FLAC',
+  };
 }
 
 export const solaraAdapter = {
   id: 'solara',
   name: 'Solara 跳板',
   connected: true, // 外部公共服务，无需本地依赖
-  async search(keywords, type) {
-    // 关键词搜索只覆盖「单曲 / 歌手 / 专辑」；歌单统一走「分享地址导入」，
-    // 不再做关键词歌单搜索（各家平台歌单搜索需登录态/反爬，且用户要求以链接导入）。
-    if (type === 'song') {
-      const songs = await searchSongs(keywords);
-      return { songs, playlists: [], artists: [], albums: [] };
-    }
+  async search(keywords, type, limit) {
+    // Solara 在此只负责「歌手 / 专辑」委托给网易云直连（delegateSearch）；
+    // 单曲召回完全由后端并行的「网易云直连」(neRes) 覆盖（更快且自带封面），
+    // 不再经 Solara 跳板搜 joox/bilibili 慢源（每首需回查+封面，阻塞 ~10s 却只补极少独有曲目）。
+    // 歌单统一走「分享地址导入」，不再做关键词歌单搜索。
     if (type === 'artist') {
       const rest = await delegateSearch(keywords, 'artist');
       return { songs: [], playlists: [], artists: rest.artists, albums: [] };
@@ -308,13 +296,10 @@ export const solaraAdapter = {
       return { songs: [], playlists: [], artists: [], albums: rest.albums };
     }
     if (type === 'all') {
-      const [songs, rest] = await Promise.all([
-        searchSongs(keywords),
-        delegateSearch(keywords, 'all'),
-      ]);
-      return { songs, playlists: [], artists: rest.artists, albums: rest.albums };
+      const rest = await delegateSearch(keywords, 'all');
+      return { songs: [], playlists: [], artists: rest.artists, albums: rest.albums };
     }
-    // type === 'playlist' 等：关键词不返回歌单
+    // type === 'song' / 'playlist' 等：单曲交给 neRes，关键词不返回歌单
     return { songs: [], playlists: [], artists: [], albums: [] };
   },
   songUrl,

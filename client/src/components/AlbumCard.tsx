@@ -3,11 +3,18 @@ import type { Album } from '../types';
 interface AlbumCardProps {
   album: Album;
   platformName: string;
+  onOpen?: () => void;
 }
 
-export default function AlbumCard({ album, platformName }: AlbumCardProps) {
+export default function AlbumCard({ album, platformName, onOpen }: AlbumCardProps) {
   return (
-    <div className="card">
+    <div
+      className="card card--clickable"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen?.(); } }}
+    >
       <img
         className="card__cover"
         src={album.cover || ''}

@@ -7,3 +7,12 @@ dist/
 server/.env
 server/.netease_login_qr.png
 
+
+# 临时调试脚本与构建产物
+server/_*.mjs
+server/_*.html
+client/vite.config.ts.timestamp-*.mjs
+
+# 测试用截图
+_*.png
+

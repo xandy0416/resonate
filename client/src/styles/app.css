@@ -74,13 +74,20 @@ a { color: inherit; }
   padding-inline: var(--page-gutter);
 }
 
+/* ─────────────────────── 顶部 LOGO 外层容器 ─────────────────────── */
+/* 与 .app-main 同一机制：抽屉打开时右推让出抽屉宽度，内部 flex 居中，
+   使 LOGO 居中于「视口 − 抽屉宽」的剩余空间，与主内容严格对齐 */
+.app-top { display: flex; justify-content: center; transition: margin-right .28s ease; }
+
 /* ─────────────────────── 导航 N5 浮岛胶囊 ─────────────────────── */
 .nav-pill {
-  position: fixed;
-  inset: var(--space-md) auto auto 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-sticky);
-  display: inline-flex;
+  /* 不再固定：随页面一起滚动；由外层 .app-top 的 flex 居中（自身 margin 左右为 0），整块下移 --nav-offset */
+  position: relative;
+  width: fit-content;
+  margin: calc(var(--space-md) + var(--nav-offset)) 0 0;
+  z-index: var(--z-raised);
+  /* 必须用块级 flex：inline-flex 属行内级元素，margin-inline:auto 会被算成 0、无法居中 */
+  display: flex;
   align-items: center;
   gap: var(--space-md);
   padding: 0.5rem 0.625rem 0.5rem 1rem;
@@ -140,7 +147,7 @@ a { color: inherit; }
 
 /* ─────────────────────── Hero（居中氛围） ─────────────────────── */
 .hero {
-  padding-top: clamp(7rem, 16vh, 11rem);
+  padding-top: var(--hero-top-gap);
   padding-bottom: var(--space-2xl);
   text-align: center;
 }
@@ -167,22 +174,6 @@ a { color: inherit; }
   gap: var(--space-md);
 }
 
-.hero__hint {
-  max-width: 760px;
-  margin: var(--space-sm) auto 0;
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  color: var(--color-ink-soft);
-}
-.hero__hint code {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  padding: 0.05em 0.35em;
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--color-accent) 12%, transparent);
-  color: var(--color-accent);
-}
-}
 .platforms {
   display: flex;
   flex-wrap: wrap;
@@ -271,7 +262,9 @@ a { color: inherit; }
 .search__submit .spinner { width: 1rem; height: 1rem; }
 
 /* ─────────────────────── 结果区 ─────────────────────── */
-.results { padding-bottom: var(--space-3xl); }
+/* 结果区底部不再留白：与页脚之间的间距统一由 .foot-stmt 的 padding-top 提供（当前 100px），
+   否则会与页脚上内边距叠加，视觉间距翻倍 */
+.results { padding-bottom: 0; }
 
 .tabs {
   display: flex;
@@ -362,6 +355,7 @@ a { color: inherit; }
 }
 .song-row__text { flex: 1; min-width: 0; }
 .song-row__title {
+  margin: 0;
   font-weight: 500;
   font-size: var(--text-base);
   white-space: nowrap;
@@ -370,6 +364,8 @@ a { color: inherit; }
 }
 .song-row--playing .song-row__title { color: var(--color-accent); }
 .song-row__sub {
+  margin: 0;
+  margin-top: 0.1rem;
   color: var(--color-muted);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -408,7 +404,54 @@ a { color: inherit; }
   border-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
   font-weight: 600;
 }
+.badge--muted {
+  color: var(--color-muted);
+  background: transparent;
+  border-color: color-mix(in oklch, var(--color-muted) 40%, transparent);
+}
+.badge--pending {
+  color: var(--color-neutral);
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--color-neutral) 55%, transparent);
+}
+.song-row--unavailable { opacity: 0.62; }
+.song-row--unavailable .song-row__title { color: var(--color-muted); }
 .song-row__actions { display: flex; gap: var(--space-2xs); flex-shrink: 0; }
+
+/* 批量下载：单曲行勾选框 */
+.song-row--selectable { grid-template-columns: auto 48px minmax(0, 1fr) auto; }
+.song-row__check {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+}
+.song-row__check input { width: 18px; height: 18px; accent-color: var(--color-accent); cursor: pointer; }
+
+/* 批量下载工具栏（歌单抽屉 / 搜索结果歌曲列表通用） */
+.batch-bar {
+  display: flex; align-items: center; gap: var(--space-2xs); flex-wrap: nowrap;
+  padding: var(--space-sm) var(--space-sm);
+  margin-bottom: var(--space-2xs);
+  border-bottom: var(--rule-hair) solid var(--color-rule);
+}
+.batch-bar__check {
+  display: inline-flex; align-items: center; gap: var(--space-2xs);
+  font-size: var(--text-sm); color: var(--color-muted); cursor: pointer; user-select: none;
+  flex-shrink: 0;
+}
+.batch-bar__check input { width: 16px; height: 16px; accent-color: var(--color-accent); cursor: pointer; }
+.batch-bar__count {
+  font-size: var(--text-xs); color: var(--color-neutral); font-family: var(--font-mono);
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.batch-bar__actions { display: flex; gap: var(--space-2xs); margin-left: auto; flex-shrink: 0; }
+.batch-bar .set-btn { padding: 0.3rem 0.55rem; white-space: nowrap; }
+.set-btn.set-btn--primary {
+  background: var(--color-accent); color: var(--color-on-accent, #fff); border-color: var(--color-accent);
+}
+.set-btn.set-btn--primary:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-accent) 85%, black); color: var(--color-on-accent, #fff);
+}
 
 /* ── 图标按钮（44px 命中区） ── */
 .icon-btn {
@@ -452,6 +495,8 @@ a { color: inherit; }
   .card:hover { transform: translateY(-3px); border-color: var(--color-accent); background: var(--color-paper-3); }
 }
 .card:active { transform: translateY(0); }
+.card--clickable { cursor: pointer; outline: none; }
+.card--clickable:focus-visible { border-color: var(--color-focus); box-shadow: 0 0 0 2px var(--color-focus); }
 .card__cover {
   width: 100%;
   aspect-ratio: 1;
@@ -497,6 +542,11 @@ a { color: inherit; }
   padding: var(--space-3xl) var(--space-md);
   color: var(--color-muted);
 }
+/* 默认首页空状态：上下留白各缩减约 1/3（仅此状态，不影响「无结果」的 .empty） */
+.empty--intro {
+  padding-top: 34px;
+  padding-bottom: 43px;
+}
 .empty__title { font-family: var(--font-display); font-size: var(--text-lg); color: var(--color-ink); margin-bottom: var(--space-xs); }
 .empty__hint { font-size: var(--text-sm); max-width: 42ch; margin-inline: auto; }
 .empty__note {
@@ -521,6 +571,9 @@ a { color: inherit; }
 }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .sk-row { height: 64px; border-radius: var(--radius-md); margin-bottom: var(--space-2xs); }
+/* 在单曲列表（grid + gap:4px）内，骨架行的下边距会与 gap 叠加成 8px，
+   与真实 .song-row 的 4px 行距不一致 —— 列表内归零，仅由 gap 控制 */
+.song-list .sk-row { margin-bottom: 0; }
 .sk-card { height: 220px; border-radius: var(--radius-lg); }
 
 /* ─────────────────────── 播放条 ─────────────────────── */
@@ -559,6 +612,26 @@ a { color: inherit; }
 }
 .seek::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent); border: none; cursor: pointer; }
 .player__right { display: flex; align-items: center; gap: var(--space-2xs); flex-shrink: 0; }
+/* 歌单抽屉打开时：播放条左移避让抽屉，并抬升到遮罩之上，确保进度条始终可见可拖 */
+.player--shifted {
+  right: var(--drawer-width);
+  z-index: calc(var(--z-modal) + 50);
+}
+
+/* 主内容容器：默认占满视口；歌单抽屉打开时整体左移（push 布局），
+   给右侧抽屉腾出空间，使抽屉不再遮挡主页面内容。子块 .shell 会在收缩后的
+   可用宽度内自动居中，视觉上即「内容整体往左侧移动」。 */
+.app-main { transition: margin-right .28s ease; }
+.app-main--pushed { margin-right: var(--drawer-width); }
+/* 顶部 LOGO 外层与 .app-main 同步右推，抽屉打开时一起左移，保持对齐一致 */
+.app-top--pushed { margin-right: var(--drawer-width); }
+
+/* 窄屏（抽屉接近占满视口）不做推开，保持覆盖式呈现；播放条也回到全宽、并降至抽屉之下 */
+@media (max-width: 780px) {
+  .app-main--pushed { margin-right: 0; }
+  .app-top--pushed { margin-right: 0; }
+  .player--shifted { right: 0; z-index: 100; }
+}
 
 /* ─────────────────────── 抽屉（歌单详情 / 下载队列） ─────────────────────── */
 .scrim {
@@ -574,15 +647,129 @@ a { color: inherit; }
   position: fixed;
   top: 0; right: 0; bottom: 0;
   z-index: calc(var(--z-modal) + 1);
-  width: min(440px, 94vw);
+  width: var(--drawer-width);
   background: var(--color-paper);
   border-left: var(--rule-hair) solid var(--color-rule);
+  /* 改为非模态侧边面板：以投影表达层级，不再用全屏遮罩压暗主内容 */
+  box-shadow: -24px 0 60px -24px var(--color-shadow);
   transform: translateX(100%);
   transition: transform var(--dur-long) var(--ease-out);
   display: flex;
   flex-direction: column;
 }
 .drawer.open { transform: translateX(0); }
+
+/* ── 抽屉多标签页条 ── */
+.drawer__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-sm) var(--space-md) var(--space-xs);
+  border-bottom: var(--rule-hair) solid var(--color-rule);
+  flex: 0 0 auto;
+}
+.drawer__tabs-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.drawer__tabs-viewport::-webkit-scrollbar { display: none; }
+.dtab__nav {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 24px; height: 24px;
+  border: var(--rule-hair) solid var(--color-rule-2);
+  background: var(--color-paper-2);
+  color: var(--color-muted);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
+}
+.dtab__nav:hover:not(:disabled) { color: var(--color-ink); border-color: var(--color-accent); background: var(--color-paper-3); }
+.dtab__nav:disabled { display: none; }
+.dtab__nav svg { width: 0.95rem; height: 0.95rem; }
+
+.dtab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  flex: 0 0 auto;
+  max-width: 190px;
+  padding: 0.3rem 0.3rem 0.3rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: var(--rule-hair) solid var(--color-rule);
+  background: var(--color-paper-2);
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-out),
+              border-color var(--dur-short) var(--ease-out),
+              color var(--dur-short) var(--ease-out);
+}
+.dtab:hover { background: var(--color-paper-3); color: var(--color-ink); }
+.dtab--active {
+  background: color-mix(in oklch, var(--color-accent) 20%, var(--color-paper-2));
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+.dtab__cover {
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--color-rule);
+  flex-shrink: 0;
+}
+.dtab__cover--ph {
+  background: color-mix(in oklch, var(--color-rule) 60%, var(--color-accent) 12%);
+}
+.dtab__name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.dtab__spin {
+  width: 0.85rem; height: 0.85rem;
+  border: 2px solid color-mix(in oklch, var(--color-ink) 30%, transparent);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.dtab__close {
+  display: inline-grid;
+  place-items: center;
+  width: 20px; height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--color-neutral);
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+.dtab__close svg { width: 0.8rem; height: 0.8rem; }
+.dtab__close:hover { background: color-mix(in oklch, var(--color-error) 30%, transparent); color: var(--color-error); }
+.dtab__closeall {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 24px; height: 24px;
+  border: var(--rule-hair) solid var(--color-rule-2);
+  background: transparent;
+  color: var(--color-neutral);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
+}
+.dtab__closeall svg { width: 0.9rem; height: 0.9rem; }
+.dtab__closeall:hover { color: var(--color-error); border-color: color-mix(in oklch, var(--color-error) 50%, transparent); background: color-mix(in oklch, var(--color-error) 14%, transparent); }
 .drawer__head {
   display: flex; align-items: center; gap: var(--space-sm);
   padding: var(--space-lg) var(--space-lg) var(--space-md);
@@ -590,12 +777,59 @@ a { color: inherit; }
 }
 .drawer__title { font-family: var(--font-display); font-size: var(--text-md); font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .drawer__body { flex: 1; overflow-y: auto; padding: var(--space-md) var(--space-lg) var(--space-2xl); }
+/* 抽屉宽度仅 440px，但视口可能很宽（窄屏媒体查询命中不了）。
+   若歌曲行仍用「标题 + 元信息同一行」的横向 flex，元信息（时长/大小/FLAC 徽标）
+   会把 flex:1 的标题列挤到 0 宽，中文变成竖排单字。
+   因此抽屉内改为两行式：标题/歌手在上，元信息换行在下。 */
+.drawer .song-row { gap: var(--space-sm); }
+.drawer .song-row__info {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.0625rem;
+}
+.drawer .song-row__text { flex: 0 1 auto; width: 100%; }
+/* 抽屉内歌名/歌手允许换行，确保长标题也能完整显示（不再被截断/挤压） */
+.drawer .song-row__title { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.3; }
+.drawer .song-row__sub { white-space: normal; }
+.drawer .song-row__meta { flex-wrap: wrap; }
 .drawer__hero { display: flex; gap: var(--space-md); margin-bottom: var(--space-lg); }
 .drawer__cover { width: 96px; height: 96px; border-radius: var(--radius-md); object-fit: cover; background: var(--color-rule); flex-shrink: 0; }
 .drawer__meta { min-width: 0; }
 .drawer__meta h3 { font-size: var(--text-lg); margin-bottom: var(--space-2xs); }
 .drawer__meta p { color: var(--color-muted); font-size: var(--text-sm); margin: 0 0 var(--space-2xs); }
 .drawer__desc { color: var(--color-neutral); font-size: var(--text-xs); line-height: 1.5; }
+.drawer__note {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-left: 2px solid var(--color-accent);
+  background: color-mix(in oklch, var(--color-accent) 10%, transparent);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.drawer__note-text { flex: 1 1 14ch; min-width: 0; }
+.drawer__retry {
+  margin-left: auto;
+  padding: 2px 10px;
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+.drawer__retry:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-accent) 24%, transparent);
+}
+.drawer__retry:disabled { opacity: 0.5; cursor: default; }
 
 .dl-item {
   display: flex; align-items: center; gap: var(--space-sm);
@@ -605,6 +839,172 @@ a { color: inherit; }
 .dl-item__title { flex: 1; min-width: 0; font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-item__status { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-neutral); white-space: nowrap; }
 .dl-item__status--ok { color: var(--color-success); }
+.dl-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dl-item__time { font-size: var(--text-xs); color: var(--color-neutral); }
+
+/* ─────────────────────── 右侧悬浮图标栏 ─────────────────────── */
+.rail {
+  position: fixed;
+  right: var(--space-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  /* 低于遮罩层：抽屉打开时自然被压暗，避免与抽屉抢点击 */
+  z-index: calc(var(--z-modal) - 1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs);
+  background: var(--color-paper-2);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: 999px;
+  box-shadow: 0 10px 28px var(--color-shadow);
+}
+
+.rail__btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: var(--rule-hair) solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-muted);
+  transition: background var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+.rail__btn:hover { background: var(--color-paper-3); color: var(--color-ink); }
+.rail__btn:active { transform: translateY(1px); }
+.rail__btn--active { background: var(--color-accent); color: var(--color-accent-ink); }
+.rail__icon { display: grid; place-items: center; }
+.rail__icon svg { width: 1.25rem; height: 1.25rem; }
+
+.rail__badge {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding-inline: 0.25rem;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1.05rem;
+  text-align: center;
+}
+.rail__btn--active .rail__badge { background: var(--color-paper); color: var(--color-ink); }
+
+/* 图标即入口，文字说明只在悬浮/聚焦时展开 */
+.rail__tip {
+  position: absolute;
+  right: calc(100% + var(--space-xs));
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--color-paper-3);
+  border: var(--rule-hair) solid var(--color-rule-2);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+}
+.rail__btn:hover .rail__tip,
+.rail__btn:focus-visible .rail__tip { opacity: 1; transform: translateY(-50%) translateX(0); }
+
+/* ─────────────────────── 播放记录条目 ─────────────────────── */
+.rec-item {
+  display: grid;
+  grid-template-columns: 2.75rem 1fr auto;
+  gap: var(--space-sm);
+  align-items: center;
+  padding: var(--space-xs) 0;
+  border-bottom: var(--rule-hair) solid var(--color-rule);
+}
+.rec-item__cover {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--color-paper-2);
+}
+.rec-item__cover--empty { display: grid; place-items: center; color: var(--color-neutral); }
+.rec-item__cover--empty svg { width: 1.1rem; height: 1.1rem; }
+.rec-item__main { min-width: 0; display: flex; flex-direction: column; }
+.rec-item__title { font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-item__meta { font-size: var(--text-xs); color: var(--color-neutral); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-item__ops { display: flex; gap: var(--space-3xs); }
+.rec-item--playing .rec-item__title { color: var(--color-accent); }
+
+/* ─────────────────────── 设置面板 ─────────────────────── */
+.drawer__actions { display: flex; gap: var(--space-2xs); }
+.set-group { margin-bottom: var(--space-lg); }
+.set-group__title {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  color: var(--color-neutral);
+  margin-bottom: var(--space-2xs);
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: var(--rule-hair) solid var(--color-rule);
+}
+.set-row--stack { flex-direction: column; align-items: stretch; }
+.set-row__text { display: flex; flex-direction: column; min-width: 0; }
+.set-row__label { font-size: var(--text-sm); }
+.set-row__hint { font-size: var(--text-xs); color: var(--color-neutral); }
+.set-row__control { flex-shrink: 0; }
+
+.set-select {
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: var(--rule-hair) solid var(--color-rule-2);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+}
+.set-select option { background: var(--color-paper-2); color: var(--color-ink); }
+
+.set-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: var(--rule-hair) solid var(--color-rule-2);
+  background: transparent;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  transition: background var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+.set-btn svg { width: 1rem; height: 1rem; }
+.set-btn:hover:not(:disabled) { background: color-mix(in oklch, var(--color-accent) 20%, transparent); color: var(--color-ink); }
+.set-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.set-list { list-style: none; margin: var(--space-xs) 0 0; padding: 0; }
+.set-list__item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-2xs) 0;
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+.set-dot { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-neutral); }
+.set-dot--ok { color: var(--color-success); }
+
+@media (max-width: 720px) {
+  .rail { right: var(--space-2xs); gap: 0; padding: 0.15rem; }
+  .rail__btn { width: 2.15rem; height: 2.15rem; }
+  .rail__tip { display: none; }
+}
 
 /* ─────────────────────── Toast ─────────────────────── */
 .toasts {
@@ -632,7 +1032,11 @@ a { color: inherit; }
 
 /* ─────────────────────── 页脚 Ft5 陈述式 ─────────────────────── */
 .foot-stmt {
-  padding: var(--space-3xl) var(--page-gutter) var(--space-xl);
+  /* 直接复用 .shell 版心（max-width 1120 + margin-inline:auto 居中 + page-gutter 内边距），
+     与 .results.shell 同源，保证「版权分隔线」长度 === 「搜索结果标签栏」底线长度。
+     ⚠️ 这里只能用 padding-top/bottom 长写：若用 padding 简写会把 .shell 的 padding-inline 覆盖成 0。 */
+  padding-top: 50px;
+  padding-bottom: var(--space-xl);
   display: grid;
   gap: var(--space-lg);
 }
@@ -646,10 +1050,11 @@ a { color: inherit; }
 }
 .foot-stmt__meta {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  justify-content: center;
+  align-items: center;
   gap: var(--space-md);
-  padding-block-start: var(--space-sm);
+  margin: 0;
+  padding-top: 10px;
   border-top: var(--rule-hair) solid var(--color-rule);
   flex-wrap: wrap;
 }
@@ -675,7 +1080,7 @@ a { color: inherit; }
 }
 
 @media (max-width: 40rem) {
-  .hero { padding-top: clamp(6rem, 14vh, 8rem); }
+  .hero { padding-top: var(--hero-top-gap); }
   .hero__sub { font-size: var(--text-base); margin-bottom: var(--space-lg); }
   .search__submit { padding: 0.6rem 1rem; }
   .player { grid-template-columns: auto 1fr auto; }

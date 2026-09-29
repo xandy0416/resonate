@@ -18,6 +18,7 @@ export interface Song {
   src?: string; // 原始音源（Solara 跳板用，用于取直链）
   flac?: boolean; // 是否为 FLAC 高质量
   fromPlatform?: string; // 发现来源平台（网易云 / 汽水等）
+  resolveFailed?: boolean; // 按需解析尝试过且失败（无可用音源）
 }
 
 export interface Playlist {
@@ -63,4 +64,35 @@ export interface PlaylistDetail extends Playlist {
   totalCount?: number; // 歌单实际曲目数（解析到的）
 }
 
-export type ResultTab = 'song' | 'artist' | 'album';
+// 通用「曲目集合」详情：歌单 / 歌手 / 专辑 共用，点开后统一展示 FLAC 曲目。
+export interface CollectionDetail {
+  name: string;
+  cover: string;
+  subtitle: string; // 副标题，如「创建者 xxx · N 首」或「周杰伦 · 2000」
+  count: number;
+  resolvedCount?: number; // 已解析出直链的曲目数（含降级为 MP3 的）
+  flacCount?: number; // 其中真正拿到 FLAC 的曲目数
+  mp3Count?: number; // 降级为 MP3 的曲目数
+  noSrcCount?: number; // 无可用音源的曲目数
+  totalCount?: number;
+  owner?: string; // 歌单创建者（仅歌单有）
+  songs: Song[];
+}
+
+export type ResultTab = 'song' | 'playlist' | 'artist' | 'album';
+
+// 抽屉标签页类型：歌单 / 歌手 / 专辑 / 分享链接导入
+export type CollectionKind = 'playlist' | 'artist' | 'album' | 'import';
+
+// 抽屉中的一个标签页：对应一个「曲目集合」详情（歌单/歌手/专辑/导入）。
+// 多个标签可同时打开，互不干扰，各自独立加载、各自独立批量选择。
+export interface DrawerTab {
+  id: string;          // 唯一标签 id
+  kind: CollectionKind;
+  key: string;         // 去重键：platform-id / url，避免同一集合重复开标签
+  title: string;       // 标签标题（加载后用真实名覆盖）
+  cover?: string;      // 标签缩略图（加载后填充）
+  loading: boolean;
+  detail: CollectionDetail | null;
+  loader: () => Promise<CollectionDetail>; // 加载函数，retry 时复用
+}

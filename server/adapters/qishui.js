@@ -50,6 +50,30 @@ function decTrackId(id) {
   }
 }
 
+// 把 undici 的 "fetch failed" 展开成可诊断的描述。
+// undici 会把真实原因藏在 e.cause，只透出 "fetch failed"，
+// 使用者无法区分「网络被阻断/被 RST」与「链接已失效」——这里补齐。
+function describeFetchError(e) {
+  const code = (e && e.cause && (e.cause.code || e.cause.errno)) || (e && e.code) || '';
+  const base = (e && e.message) || String(e);
+  if (code === 'ECONNRESET' || code === 'EPIPE' || code === 'ECONNABORTED') {
+    return `连接被重置(${code})：当前网络无法访问汽水/抖音域名，通常是防火墙、代理或运营商限制；请更换网络（如手机热点）或配置代理后重试`;
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return `域名解析失败(${code})：请检查本机 DNS 或网络连接`;
+  }
+  if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'UND_ERR_HEADERS_TIMEOUT') {
+    return `连接超时(${code})：网络不通或被拦截，请更换网络后重试`;
+  }
+  if (/^(ERR_TLS|CERT_|UNABLE_TO_VERIFY|SELF_SIGNED|DEPTH_ZERO)/.test(String(code)) || code === 'ERR_SSL_WRONG_VERSION_NUMBER') {
+    return `TLS 握手失败(${code})：连接可能被中间设备拦截`;
+  }
+  if (/ENETUNREACH|EHOSTUNREACH|ENETDOWN/.test(String(code))) {
+    return `网络不可达(${code})：请检查网络连接`;
+  }
+  return code ? `${base}（${code}）` : base;
+}
+
 // —— 抓取分享页（带手机 UA）——
 async function fetchHtml(url, retries = 3) {
   let last;
@@ -67,7 +91,7 @@ async function fetchHtml(url, retries = 3) {
       if (body && body.length > 500) return body;
       last = `返回内容过短(${body.length}B)`;
     } catch (e) {
-      last = e.message;
+      last = describeFetchError(e);
     }
     if (i < retries - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
   }
@@ -262,15 +286,23 @@ function parseShare(html) {
   const loader = data.loaderData || {};
   // 选取歌单页
   let page;
-  const named = Object.entries(loader).find(([k]) => k.toLowerCase().includes('playlist'));
-  if (named) page = named[1];
-  else {
-    const any = Object.entries(loader).find(([, v]) => v && typeof v === 'object');
-    page = any ? any[1] : null;
-  }
+  // loader 里同时存在 playlist_layout / playlist_page，且 playlist_layout 常为 null
+  // （键序还在前）——若直接 find('playlist') 会选中 null 而误报「没有歌单数据」。
+  // 因此先过滤空值对象，并优先选「确实带曲目列表(medias/tracks)」的 page。
+  const objs = Object.entries(loader).filter(([, v]) => v && typeof v === 'object');
+  const LIST_FIELDS = ['medias', 'tracks', 'track_list', 'trackList', 'songs', 'song_list'];
+  const hasList = (v) => LIST_FIELDS.some((k) => Array.isArray(v[k]));
+  page =
+    (objs.find(([k, v]) => hasList(v) && k.toLowerCase().includes('playlist')) || [])[1] ||
+    (objs.find(([k]) => k.toLowerCase().includes('playlist')) || [])[1] ||
+    (objs.find(([, v]) => hasList(v)) || [])[1] ||
+    (objs[0] || [])[1] ||
+    null;
   if (!page) throw new Error('页面里没有歌单数据，可能不是歌单分享链接。');
 
-  const [, rawList] = pickTrackList(page);
+  // pickTrackList 返回 [路径, 键名, 数组] 三元组，这里必须取「索引 2 的数组」；
+  // 之前写成 [, rawList] 取到了键名字符串，导致遍历字符、曲目全丢（count=0）。
+  const [, , rawList] = pickTrackList(page);
   const tracks = [];
   const seen = new Set();
   for (const item of rawList) {
@@ -301,7 +333,10 @@ function parseShare(html) {
     const n = parseInt(declaredRaw, 10);
     if (Number.isFinite(n) && n > 0 && n < 100000) declared = n;
   }
-  const cover = fmtCover(meta.cover || meta.coverURL || meta.cover_url || '');
+  // 汽水歌单封面字段是 url_cover（结构 {uri,urls,template_prefix}），需一并纳入。
+  const cover = fmtCover(
+    meta.url_cover || meta.cover || meta.coverURL || meta.cover_url || meta.coverUrl || ''
+  );
 
   return { title, creator: creator.trim(), declared, count: tracks.length, cover, tracks };
 }

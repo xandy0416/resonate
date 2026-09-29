@@ -1,7 +1,9 @@
-import type { ResultTab, SearchResults, Song } from '../types';
+import { useState } from 'react';
+import type { ResultTab, SearchResults, Song, Playlist, Artist, Album } from '../types';
 import SongRow from './SongRow';
 import ArtistCard from './ArtistCard';
 import AlbumCard from './AlbumCard';
+import PlaylistCard from './PlaylistCard';
 
 interface ResultsProps {
   results: SearchResults | null;
@@ -11,14 +13,19 @@ interface ResultsProps {
   activeTab: ResultTab;
   onTabChange: (t: ResultTab) => void;
   playingId: string | null;
-  downloadingId: string | null;
+  downloadingIds: Set<string>;
   platformName: (id: string) => string;
   onPlaySong: (s: Song) => void;
   onDownloadSong: (s: Song) => void;
+  onDownloadSongs: (songs: Song[]) => void;
+  onOpenPlaylist: (p: Playlist) => void;
+  onOpenArtist: (a: Artist) => void;
+  onOpenAlbum: (al: Album) => void;
 }
 
 const TABS: { key: ResultTab; label: string }[] = [
   { key: 'song', label: '单曲' },
+  { key: 'playlist', label: '歌单' },
   { key: 'artist', label: '歌手' },
   { key: 'album', label: '专辑' },
 ];
@@ -26,25 +33,26 @@ const TABS: { key: ResultTab; label: string }[] = [
 export default function Results(props: ResultsProps) {
   const {
     results, loading, error, query, activeTab, onTabChange,
-    playingId, downloadingId, platformName,
-    onPlaySong, onDownloadSong,
+    playingId, downloadingIds, platformName,
+    onPlaySong, onDownloadSong, onDownloadSongs, onOpenPlaylist, onOpenArtist, onOpenAlbum,
   } = props;
 
   const counts = results
     ? {
         song: results.songs.length,
+        playlist: results.playlists.length,
         artist: results.artists.length,
         album: results.albums.length,
       }
-    : { song: 0, artist: 0, album: 0 };
+    : { song: 0, playlist: 0, artist: 0, album: 0 };
 
   return (
     <section className="results shell" aria-label="搜索结果">
       {!results && !loading && !error && (
-        <div className="empty">
+        <div className="empty empty--intro">
           <p className="empty__title">开始你的第一次搜索</p>
           <p className="empty__hint">
-            在上方输入歌曲、歌手或专辑名称，自动跨平台聚合搜索（FLAC 无损）。
+            在上方输入歌曲、歌单、歌手或专辑名称，自动跨平台聚合搜索（FLAC 无损）。
             也可以直接粘贴任意平台的歌单分享地址一键导入。
           </p>
         </div>
@@ -89,10 +97,14 @@ export default function Results(props: ResultsProps) {
             tab={activeTab}
             results={results}
             playingId={playingId}
-            downloadingId={downloadingId}
+            downloadingIds={downloadingIds}
             platformName={platformName}
             onPlaySong={onPlaySong}
             onDownloadSong={onDownloadSong}
+            onDownloadSongs={onDownloadSongs}
+            onOpenPlaylist={onOpenPlaylist}
+            onOpenArtist={onOpenArtist}
+            onOpenAlbum={onOpenAlbum}
             query={query}
           />
         </>
@@ -102,30 +114,46 @@ export default function Results(props: ResultsProps) {
 }
 
 function TabBody({
-  tab, results, playingId, downloadingId, platformName,
-  onPlaySong, onDownloadSong, query,
+  tab, results, playingId, downloadingIds, platformName,
+  onPlaySong, onDownloadSong, onDownloadSongs, onOpenPlaylist, onOpenArtist, onOpenAlbum, query,
 }: {
   tab: ResultTab;
   results: SearchResults;
   playingId: string | null;
-  downloadingId: string | null;
+  downloadingIds: Set<string>;
   platformName: (id: string) => string;
   onPlaySong: (s: Song) => void;
   onDownloadSong: (s: Song) => void;
+  onDownloadSongs: (songs: Song[]) => void;
+  onOpenPlaylist: (p: Playlist) => void;
+  onOpenArtist: (a: Artist) => void;
+  onOpenAlbum: (al: Album) => void;
   query: string;
 }) {
   if (tab === 'song') {
     if (results.songs.length === 0) return <EmptyTab query={query} noun="单曲" />;
     return (
-      <div className="song-list">
-        {results.songs.map((s) => (
-          <SongRow
-            key={`${s.platform}-${s.id}`}
-            song={s}
-            isPlaying={playingId === s.id}
-            isDownloading={downloadingId === s.id}
-            onPlay={() => onPlaySong(s)}
-            onDownload={() => onDownloadSong(s)}
+      <SongList
+        songs={results.songs}
+        playingId={playingId}
+        downloadingIds={downloadingIds}
+        onPlaySong={onPlaySong}
+        onDownloadSong={onDownloadSong}
+        onDownloadSongs={onDownloadSongs}
+      />
+    );
+  }
+
+  if (tab === 'playlist') {
+    if (results.playlists.length === 0) return <EmptyTab query={query} noun="歌单" />;
+    return (
+      <div className="card-grid">
+        {results.playlists.map((p) => (
+          <PlaylistCard
+            key={`${p.platform}-${p.id}`}
+            playlist={p}
+            platformName={platformName(p.platform)}
+            onOpen={() => onOpenPlaylist(p)}
           />
         ))}
       </div>
@@ -137,7 +165,12 @@ function TabBody({
     return (
       <div className="card-grid">
         {results.artists.map((a) => (
-          <ArtistCard key={`${a.platform}-${a.id}`} artist={a} platformName={platformName(a.platform)} />
+          <ArtistCard
+            key={`${a.platform}-${a.id}`}
+            artist={a}
+            platformName={platformName(a.platform)}
+            onOpen={() => onOpenArtist(a)}
+          />
         ))}
       </div>
     );
@@ -148,7 +181,12 @@ function TabBody({
     return (
       <div className="card-grid">
         {results.albums.map((al) => (
-          <AlbumCard key={`${al.platform}-${al.id}`} album={al} platformName={platformName(al.platform)} />
+          <AlbumCard
+            key={`${al.platform}-${al.id}`}
+            album={al}
+            platformName={platformName(al.platform)}
+            onOpen={() => onOpenAlbum(al)}
+          />
         ))}
       </div>
     );
@@ -182,5 +220,73 @@ function EmptyTab({ query, noun }: { query: string; noun: string }) {
       <p className="empty__title">没有找到相关{noun}</p>
       <p className="empty__hint">没有与「{query}」匹配的{noun}。换个关键词，或试试其它已接入的平台。</p>
     </div>
+  );
+}
+
+// 搜索结果「单曲」列表：支持勾选 + 一键下载全部 / 下载选中。
+function SongList({
+  songs, playingId, downloadingIds, onPlaySong, onDownloadSong, onDownloadSongs,
+}: {
+  songs: Song[];
+  playingId: string | null;
+  downloadingIds: Set<string>;
+  onPlaySong: (s: Song) => void;
+  onDownloadSong: (s: Song) => void;
+  onDownloadSongs: (songs: Song[]) => void;
+}) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // 可选 = 尚未确认无音源的曲目：未解析（点击时实时取直链）与已解析的都可勾选、可批量下载；
+  // 仅「已确认无音源」(resolveFailed=true) 才真正不可选，避免徒劳请求。
+  const selectableSongs = songs.filter((s) => !s.resolveFailed);
+  const selectableIds = selectableSongs.map((s) => s.id);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+  const selectedSongs = songs.filter((s) => selectedIds.has(s.id));
+  const toggleSelectOne = (id: string) =>
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (allSelected) selectableIds.forEach((id) => n.delete(id));
+      else selectableIds.forEach((id) => n.add(id));
+      return n;
+    });
+  return (
+    <>
+      <div className="batch-bar">
+        <label className="batch-bar__check">
+          <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={selectableIds.length === 0} />
+          <span>全选</span>
+        </label>
+        <span className="batch-bar__count">已选 {selectedSongs.length} / 可选 {selectableSongs.length}</span>
+        <div className="batch-bar__actions">
+          <button type="button" className="set-btn" onClick={() => onDownloadSongs(selectableSongs)} disabled={selectableSongs.length === 0}>
+            下载全部 ({selectableSongs.length})
+          </button>
+          <button type="button" className="set-btn set-btn--primary" onClick={() => onDownloadSongs(selectedSongs)} disabled={selectedSongs.length === 0}>
+            下载选中 ({selectedSongs.length})
+          </button>
+        </div>
+      </div>
+      <div className="song-list">
+        {songs.map((s) => (
+          <SongRow
+            key={`${s.platform}-${s.id}`}
+            song={s}
+            isPlaying={playingId === s.id}
+            isDownloading={downloadingIds.has(s.id)}
+            selectable
+            selected={selectedIds.has(s.id)}
+            onToggleSelect={() => toggleSelectOne(s.id)}
+            onPlay={() => onPlaySong(s)}
+            onDownload={() => onDownloadSong(s)}
+          />
+        ))}
+      </div>
+    </>
   );
 }

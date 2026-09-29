@@ -121,13 +121,14 @@ async function enrichSongs(songs, br) {
 }
 
 // 统一使用 cloudsearch（PC 搜索接口）：返回结构更完整，单曲封面在 al.picUrl。
-async function searchSongs(keywords, limit = 30) {
+// limit 默认 60、上限 100（网易云接口本身支持到 100；歌手被接口自身限到 40）。
+async function searchSongs(keywords, limit = 60) {
   const r = await call('cloudsearch', { keywords, type: 1, limit, offset: 0 });
   // 不在此取直链：单曲的播放/下载由 Solara 统一解析为 FLAC（见 solara.resolveFlac）。
   return (r?.result?.songs || []).map(mapSong);
 }
 
-async function searchPlaylists(keywords, limit = 30) {
+async function searchPlaylists(keywords, limit = 60) {
   const r = await call('cloudsearch', { keywords, type: 1000, limit, offset: 0 });
   return (r?.result?.playlists || []).map((p) => ({
     id: String(p.id),
@@ -140,7 +141,8 @@ async function searchPlaylists(keywords, limit = 30) {
   }));
 }
 
-async function searchArtists(keywords, limit = 30) {
+async function searchArtists(keywords, limit = 60) {
+  // 网易云歌手搜索接口自身上限约 40，limit 仅作上限保护。
   const r = await call('cloudsearch', { keywords, type: 100, limit, offset: 0 });
   return (r?.result?.artists || []).map((a) => ({
     id: String(a.id),
@@ -153,7 +155,7 @@ async function searchArtists(keywords, limit = 30) {
   }));
 }
 
-async function searchAlbums(keywords, limit = 30) {
+async function searchAlbums(keywords, limit = 60) {
   const r = await call('cloudsearch', { keywords, type: 10, limit, offset: 0 });
   return (r?.result?.albums || []).map((al) => ({
     id: String(al.id),
@@ -166,16 +168,28 @@ async function searchAlbums(keywords, limit = 30) {
   }));
 }
 
+// 歌手的全部歌曲（热门排序，最多 100 首）。
+async function artistSongs(id, limit = 100) {
+  const r = await call('artist_songs', { id, limit, offset: 0, order: 'hot' });
+  return (r?.songs || []).map(mapSong);
+}
+
+// 专辑的全部歌曲。
+async function albumSongs(id) {
+  const r = await call('album', { id });
+  return (r?.songs || []).map(mapSong);
+}
+
 export const neteaseAdapter = {
   id: 'netease',
   name: '网易云音乐',
   connected: !!NC,
-  async search(keywords, type) {
+  async search(keywords, type, limit = 60) {
     const tasks = [];
-    if (type === 'all' || type === 'song') tasks.push(searchSongs(keywords).then((v) => ['songs', v]));
-    if (type === 'all' || type === 'playlist') tasks.push(searchPlaylists(keywords).then((v) => ['playlists', v]));
-    if (type === 'all' || type === 'artist') tasks.push(searchArtists(keywords).then((v) => ['artists', v]));
-    if (type === 'all' || type === 'album') tasks.push(searchAlbums(keywords).then((v) => ['albums', v]));
+    if (type === 'all' || type === 'song') tasks.push(searchSongs(keywords, limit).then((v) => ['songs', v]));
+    if (type === 'all' || type === 'playlist') tasks.push(searchPlaylists(keywords, limit).then((v) => ['playlists', v]));
+    if (type === 'all' || type === 'artist') tasks.push(searchArtists(keywords, limit).then((v) => ['artists', v]));
+    if (type === 'all' || type === 'album') tasks.push(searchAlbums(keywords, limit).then((v) => ['albums', v]));
     const settled = await Promise.allSettled(tasks);
     const out = { songs: [], playlists: [], artists: [], albums: [] };
     for (const s of settled) {
@@ -186,6 +200,11 @@ export const neteaseAdapter = {
   async songUrl(id) {
     const map = await fetchSongUrls([id], 320000);
     return map.get(String(id)) || null;
+  },
+  // 批量取直链：一次请求问清多个 id 是否有可用音源（用于解析前预筛，
+  // 避免对「已下架 / 需 VIP」的曲目逐个打上游，白白消耗上百次请求）。
+  async songUrls(ids) {
+    return fetchSongUrls(Array.isArray(ids) ? ids : [ids], 320000);
   },
   async playlistDetail(id) {
     const r = await call('playlist_detail', { id });
@@ -219,6 +238,16 @@ export const neteaseAdapter = {
   async rawUrl(id) {
     const u = await this.songUrl(id);
     return u?.url || null;
+  },
+  // 歌手详情曲目（供 /api/artist/detail 使用）。
+  async artistSongs(id) {
+    const songs = await artistSongs(String(id));
+    return songs;
+  },
+  // 专辑详情曲目（供 /api/album/detail 使用）。
+  async albumSongs(id) {
+    const songs = await albumSongs(String(id));
+    return songs;
   },
 };
 

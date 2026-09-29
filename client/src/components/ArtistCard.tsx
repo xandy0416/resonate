@@ -3,11 +3,18 @@ import type { Artist } from '../types';
 interface ArtistCardProps {
   artist: Artist;
   platformName: string;
+  onOpen?: () => void;
 }
 
-export default function ArtistCard({ artist, platformName }: ArtistCardProps) {
+export default function ArtistCard({ artist, platformName, onOpen }: ArtistCardProps) {
   return (
-    <div className="card">
+    <div
+      className="card card--clickable"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen?.(); } }}
+    >
       <img
         className="card__cover card__cover--round"
         src={artist.avatar || ''}
