@@ -3,13 +3,13 @@
 #   sudo docker compose up -d --build      # 首次：本地构建
 #   sudo docker compose up -d              # 之后：直接起
 # 或改用下方已构建好的多架构镜像（CI 自动推到 GHCR，任何人可拉）：
-#   image: ghcr.io/xandy0910/resonate:latest
+#   image: ghcr.io/xandy0416/resonate:latest
 #   （把上面的 build: . 整行删掉，改用 image 那行）
 
 services:
   resonate:
     build: .
-    # image: ghcr.io/xandy0910/resonate:latest
+    # image: ghcr.io/xandy0416/resonate:latest
     container_name: resonate
     ports:
       - "9982:8787"
