@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "聚合音乐后端：平台适配器 + 网易云真实接口 + 播放/下载代理",
+  "description": "聚合音乐后端：平台适配器 + 网易云真实接口 + 播放/收藏代理",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"

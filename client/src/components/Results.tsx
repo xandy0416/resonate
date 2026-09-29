@@ -52,7 +52,7 @@ export default function Results(props: ResultsProps) {
         <div className="empty empty--intro">
           <p className="empty__title">开始你的第一次搜索</p>
           <p className="empty__hint">
-            在上方输入歌曲、歌单、歌手或专辑名称，自动跨平台聚合搜索（FLAC 无损）。
+            在上方输入歌曲、歌单、歌手或专辑名称，自动跨平台聚合搜索（高音质）。
             也可以直接粘贴任意平台的歌单分享地址一键导入。
           </p>
         </div>
