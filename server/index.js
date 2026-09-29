@@ -219,8 +219,8 @@ async function pipeMedia(req, res, asAttachment) {
   if (!adapter || !adapter.connected) return res.status(404).json({ error: '平台未接入' });
   let url;
   try {
-    // 关键：netease 平台（游客态无登录 cookie 时仅 30s 试听片段）一律改走 Solara
-    // 跳板取完整 FLAC 直链，避免「前端按需解析」后播放/下载仍拿到试听片段。
+    // 关键：netease 自身直链仅为试听片段，一律改走 Solara 跳板取完整 FLAC 直链，
+    // 避免「前端按需解析」后播放/下载仍拿到试听片段。
     if (platform === 'netease') {
       url = await solaraAdapter.rawUrl(String(id), src ? String(src) : 'netease');
     } else {

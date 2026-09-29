@@ -2,24 +2,6 @@
 // 依赖 NeteaseCloudMusicApi（二进制ify 维护），以编程方式调用其路由函数，
 // 不单独起服务，直接在 Express 进程内解析结果。
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-// —— 可选：读取 server/.env 注入登录态 ——
-// 网易云游客态只能拿到 30s 试听片段；登录后（普通账号可完整播放免费曲，
-// 会员曲需会员账号）由 NETEASE_COOKIE 提供 Cookie 即可解除限制。
-try {
-  const envPath = join(dirname(dirname(fileURLToPath(import.meta.url))), '.env');
-  const txt = readFileSync(envPath, 'utf8');
-  for (const line of txt.split('\n')) {
-    const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)\s*$/);
-    if (m && !(m[1] in process.env)) {
-      process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-    }
-  }
-} catch { /* 无 .env 则保持游客态 */ }
-
 let NC = null;
 try {
   // 该包把每个路由导出为 `(options) => Promise<{ status, body, ... }>` 的函数。
@@ -42,10 +24,7 @@ async function call(name, query = {}) {
   if (!fn) throw new Error(`NeteaseCloudMusicApi 路由 ${name} 不可用`);
   // NeteaseCloudMusicApi 的路由函数签名为 (query, request)，直接接收参数对象，
   // 返回 { status, body, cookie }。不要套 { query } 外层，否则会报「参数错误」。
-  // 若配置了登录 Cookie，则注入以支持完整播放/下载（游客态仅试听片段）。
-  const cookie = process.env.NETEASE_COOKIE || '';
-  const fullQuery = cookie ? { ...query, cookie } : query;
-  const res = await fn(fullQuery);
+  const res = await fn(query);
   if (res && typeof res === 'object' && 'body' in res) return res.body;
   return res;
 }
