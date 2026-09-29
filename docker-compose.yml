@@ -7,7 +7,7 @@
 services:
   resonate:
     # build: .
-    image: crpi-279qcm0u4zya3ofn.cn-hangzhou.personal.cr.aliyuncs.com/xandy0416/resonate:latest
+    image: registry.cn-hangzhou.aliyuncs.com/xandy0416/resonate:latest
     container_name: resonate
     ports:
       - "9982:8787"
