@@ -18,7 +18,8 @@ services:
       - NODE_ENV=production
       - TZ=Asia/Shanghai
     volumes:
-      # 持久化网易云登录态：容器内扫码登录后写入，重启不丢
-      # 宿主文件不存在时 Docker 会自动创建一个空文件
+      # 持久化网易云登录态：容器内扫码登录后写入，重启不丢。
+      # 注意：宿主必须先用 `touch server/.env` 建一个空文件再启动；
+      # 否则 Docker 会把缺失的路径建为「目录」，导致登录脚本写入失败。
       - ./server/.env:/app/server/.env:rw
     restart: unless-stopped

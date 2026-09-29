@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 // 网易云游客态只能拿到 30s 试听片段；登录后（普通账号可完整播放免费曲，
 // 会员曲需会员账号）由 NETEASE_COOKIE 提供 Cookie 即可解除限制。
 try {
-  const envPath = join(dirname(fileURLToPath(import.meta.url)), '.env');
+  const envPath = join(dirname(dirname(fileURLToPath(import.meta.url))), '.env');
   const txt = readFileSync(envPath, 'utf8');
   for (const line of txt.split('\n')) {
     const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)\s*$/);
