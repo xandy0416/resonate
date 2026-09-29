@@ -1,6 +1,6 @@
 # 聚合音乐 · Resonate
 
-一个**聚合搜索、解析、下载全网音乐**的本地工具。当前版本以 （atmospheric / Midnight 暗色氛围）规范设计界面，后端采用**平台适配器架构**——网易云音乐已真实接入，其余平台预留接口，可插拔扩展。
+一个**聚合搜索、解析、下载全网音乐**的本地工具。当前版本以手写 CSS 设计系统（atmospheric / Midnight 暗色氛围）设计界面，后端采用**平台适配器架构**——网易云音乐已真实接入，其余平台预留接口，可插拔扩展。
 
 ## 功能
 
@@ -14,7 +14,7 @@
 
 ## 技术栈
 
-- 前端：`Vite + React + TypeScript`，样式为手写 CSS（ token 系统，无 UI 框架）。
+- 前端：`Vite + React + TypeScript`，样式为手写 CSS（自建 token 系统，无 UI 框架）。
 - 后端：`Node + Express`，`NeteaseCloudMusicApi` 直连网易云（进程内调用，不起独立服务）。
 
 ## 运行
@@ -42,7 +42,7 @@ npm --prefix client run dev     # 前端
 .
 ├── client/                # 前端（Vite + React + TS）
 │   ├── src/
-│   │   ├── styles/        # tokens.css（ 设计系统）+ app.css（组件样式）
+│   │   ├── styles/        # tokens.css（设计系统 token）+ app.css（组件样式）
 │   │   ├── components/    # Nav / Hero / Results / SongRow / 卡片 / PlayerBar / 抽屉 / Footer
 │   │   ├── api.ts         # 后端接口封装
 │   │   ├── types.ts       # 统一数据类型

@@ -7,7 +7,6 @@ dist/
 server/.env
 server/.netease_login_qr.png
 
-
 # 临时调试脚本与构建产物
 server/_*.mjs
 server/_*.html

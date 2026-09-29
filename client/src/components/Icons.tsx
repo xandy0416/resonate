@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react';
 
-// 统一线性图标：currentColor + 1.8 描边，避免混用图标库（ 反模式）。
+// 统一线性图标：currentColor + 1.8 描边，避免混用图标库（统一图标风格）。
 const base: SVGProps<SVGSVGElement> = {
   viewBox: '0 0 24 24',
   fill: 'none',
