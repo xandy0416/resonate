@@ -5,6 +5,9 @@ interface HeroProps {
   onQueryChange: (v: string) => void;
   onSearch: () => void;
   loading: boolean;
+  sources: { id: string; name: string }[];
+  selectedSources: string[];
+  onToggleSource: (id: string) => void;
 }
 
 export default function Hero({
@@ -12,6 +15,9 @@ export default function Hero({
   onQueryChange,
   onSearch,
   loading,
+  sources,
+  selectedSources,
+  onToggleSource,
 }: HeroProps) {
   return (
     <header className="hero shell">
@@ -46,6 +52,26 @@ export default function Hero({
             搜索
           </button>
         </form>
+
+        {sources.length > 0 && (
+          <div className="source-toggles" role="group" aria-label="选择搜索的音乐源">
+            <span className="source-toggles__label">搜索源</span>
+            {sources.map((s) => {
+              const active = selectedSources.includes(s.id);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={active ? 'source-chip source-chip--on' : 'source-chip'}
+                  aria-pressed={active}
+                  onClick={() => onToggleSource(s.id)}
+                >
+                  {s.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </header>
   );

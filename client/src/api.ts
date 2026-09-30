@@ -23,11 +23,22 @@ export function fetchPlatforms(): Promise<Platform[]> {
   return get<Platform[]>(`${BASE}/platforms`);
 }
 
-export function search(q: string, type = 'all', limit?: number): Promise<SearchResults> {
+export function search(q: string, type = 'all', limit?: number, sources?: string[]): Promise<SearchResults> {
   const params = new URLSearchParams({ q, type });
   // 不再传 platforms：后端自动跨平台聚合搜索，并把单曲统一解析为 FLAC。
   if (limit) params.set('limit', String(limit));
+  // 搜索源多选：只召回来被勾选的源（如 netease,qq,joox），缺省=全部。
+  if (sources && sources.length) params.set('sources', sources.join(','));
   return get<SearchResults>(`${BASE}/search?${params.toString()}`);
+}
+
+// 可选「搜索源」列表：前端据此渲染搜索前的多选 chips。
+export interface SearchSource {
+  id: string;
+  name: string;
+}
+export function fetchSearchSources(): Promise<SearchSource[]> {
+  return get<SearchSource[]>(`${BASE}/search-sources`);
 }
 
 export function fetchPlaylistDetail(
@@ -73,18 +84,20 @@ export function playUrl(platform: string, id: string, src?: string): string {
   return `${BASE}/play?${p.toString()}`;
 }
 
-// 按需解析单曲直链信息：把 netease id 经 Solara 跳板解析为完整 FLAC 直链。
+// 按需解析单曲直链信息：把 id 经 Solara 跳板解析为完整 FLAC 直链。
 // 用于「搜索只聚合、点击时再取链」的按需解析模式。
+// src 为原始音源（netease / joox / bilibili），必须透传，否则 Joox/哔哩哔哩 等源的
+// 曲目会被错误按 netease 取链而导致无音源。
 export interface SongUrlInfo {
   url: string;
   size: number | null;
   br: number | null;
   format: string | null;
 }
-export function resolveSongUrl(id: string): Promise<SongUrlInfo> {
-  return get<SongUrlInfo>(
-    `${BASE}/song/url?platform=solara&src=netease&id=${encodeURIComponent(id)}`
-  );
+export function resolveSongUrl(id: string, src = 'netease'): Promise<SongUrlInfo> {
+  const p = new URLSearchParams({ platform: 'solara', id: String(id) });
+  p.set('src', src);
+  return get<SongUrlInfo>(`${BASE}/song/url?${p.toString()}`);
 }
 
 // 下载：返回带附件头的代理地址，交给浏览器保存。

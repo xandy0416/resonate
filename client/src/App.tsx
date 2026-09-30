@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Platform, ResultTab, SearchResults, Song, Playlist, Artist, Album, CollectionDetail, DrawerTab, CollectionKind } from './types';
 import {
-  fetchPlatforms, search, importPlaylist, fetchPlaylistDetail, fetchArtistSongs, fetchAlbumSongs, playUrl, downloadUrl, resolveSongUrl, saveSong,
+  fetchPlatforms, search, importPlaylist, fetchPlaylistDetail, fetchArtistSongs, fetchAlbumSongs, playUrl, downloadUrl, resolveSongUrl, saveSong, fetchSearchSources,
 } from './api';
 import Nav from './components/Nav';
 import Hero from './components/Hero';
@@ -29,6 +29,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ResultTab>('song');
   const [resultLimit, setResultLimit] = useState<number>(60);
+  // 搜索源多选：默认全选；持久化到本机，刷新不丢。仅包含真正可关键词搜索的源。
+  const [searchSources, setSearchSources] = useState<{ id: string; name: string }[]>([]);
+  const [selectedSources, setSelectedSources] = usePersistentState<string[]>('resonate.searchSources', []);
   // 下载方式：nas = 服务端落盘到挂载目录（部署在 NAS 时文件直接进 NAS）；local = 浏览器本机下载。
   const [downloadMode, setDownloadMode] = usePersistentState<'nas' | 'local'>('resonate.downloadMode', 'nas');
 
@@ -75,6 +78,16 @@ export default function App() {
       .catch(() => setError('无法连接后端服务，请确认服务已启动（见 README）。'));
   }, []);
 
+  // 初始加载可选搜索源；首次（本地无记录）默认全选。
+  useEffect(() => {
+    fetchSearchSources()
+      .then((list) => {
+        setSearchSources(list);
+        setSelectedSources((prev) => (prev && prev.length ? prev : list.map((s) => s.id)));
+      })
+      .catch(() => { /* 拉取失败则用兜底全选 */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 播放器出现时为页面底部留出空间
   useEffect(() => {
     document.body.style.paddingBottom = currentSong ? '96px' : '';
@@ -93,6 +106,18 @@ export default function App() {
     return /^https?:\/\//i.test(t) || /\b[\w-]+\.(?:com|cn|net|fm|co)\b[^\s]*/i.test(t);
   }
 
+  // 切换某个搜索源的勾选：至少保留一个（不允许全部取消，否则等于搜全部反而语义不清）。
+  function handleToggleSource(id: string) {
+    setSelectedSources((prev) => {
+      const has = prev.includes(id);
+      if (has) {
+        if (prev.length <= 1) return prev; // 保留最后一个，不允许清空
+        return prev.filter((s) => s !== id);
+      }
+      return [...prev, id];
+    });
+  }
+
   async function handleSearch() {
     const q = query.trim();
     if (!q) return;
@@ -104,7 +129,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const data = await search(q, 'all', resultLimit);
+      const data = await search(q, 'all', resultLimit, selectedSources);
       setResults(data);
       const order: ResultTab[] = ['song', 'playlist', 'artist', 'album'];
       const first = order.find((k) =>
@@ -240,7 +265,7 @@ export default function App() {
   async function resolveSong(song: Song): Promise<Song> {
     if (song.format || song.resolveFailed) return song;
     try {
-      const info = await resolveSongUrl(song.id);
+      const info = await resolveSongUrl(song.id, song.src || 'netease');
       if (!info || !info.url) throw new Error('无可用直链');
       const updated: Song = {
         ...song,
@@ -573,6 +598,9 @@ export default function App() {
           onQueryChange={setQuery}
           onSearch={handleSearch}
           loading={loading}
+          sources={searchSources}
+          selectedSources={selectedSources}
+          onToggleSource={handleToggleSource}
         />
 
         <Results

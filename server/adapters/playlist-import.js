@@ -475,13 +475,17 @@ async function miguSearchPlaylists(keywords, limit = 30) {
   }
 }
 
-export async function searchPlaylists(keywords, limit = 60) {
-  const tasks = [
-    neteaseSearchPlaylists(keywords, limit),
-    qqSearchPlaylists(keywords, limit),
-    kgSearchPlaylists(keywords, limit),
-    miguSearchPlaylists(keywords, limit),
-  ];
+// sources：可选，指定只搜哪些平台的歌单（如 ['qq','migu']）。
+// 缺省（null/undefined）仍跑全部，保持向后兼容（如分享链接导入等其它调用方）。
+// 注意：网易云的歌单由 index.js 的 netease 直连搜索统一负责，这里只在 sources 显式包含
+// 'netease' 时才重复补一次（去重由上层 dedupeById 兜底），避免与单曲搜索重复触发。
+export async function searchPlaylists(keywords, limit = 60, sources = null) {
+  const tasks = [];
+  if (!sources || sources.includes('netease')) tasks.push(neteaseSearchPlaylists(keywords, limit));
+  if (!sources || sources.includes('qq')) tasks.push(qqSearchPlaylists(keywords, limit));
+  if (!sources || sources.includes('kugou')) tasks.push(kgSearchPlaylists(keywords, limit));
+  if (!sources || sources.includes('migu')) tasks.push(miguSearchPlaylists(keywords, limit));
+  if (!tasks.length) return [];
   const settled = await Promise.allSettled(tasks);
   const out = [];
   for (const s of settled) {

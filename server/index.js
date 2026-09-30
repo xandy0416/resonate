@@ -114,6 +114,23 @@ app.get('/api/platforms', (_req, res) => {
   res.json(listPlatforms());
 });
 
+// 可选「搜索源」列表：前端在搜索前据此渲染多选（可复选）。
+// 仅包含真正支持关键词搜索、且能返回可播放 / 可导入结果的源：
+//   - 网易云：单曲 / 歌单 / 歌手 / 专辑 全覆盖（直连 cloudsearch，快且稳）；
+//   - QQ / 咪咕：歌单关键词搜索（仅作「歌单来源」），单曲直链统一走 Solara。
+// 汽水无关键词搜索能力、酷狗公开接口不稳、Joox/哔哩哔哩 经 Solara 召回的曲目无法解析为可播放
+// 直链，故不列入。这是「搜索源多选」功能的唯一权威来源，前后端共用同一份 id，避免漂移。
+const SEARCH_SOURCES = [
+  { id: 'netease', name: '网易云' },
+  { id: 'qq', name: 'QQ 音乐' },
+  { id: 'migu', name: '咪咕音乐' },
+];
+const SEARCH_SOURCE_IDS = SEARCH_SOURCES.map((s) => s.id);
+
+app.get('/api/search-sources', (_req, res) => {
+  res.json(SEARCH_SOURCES);
+});
+
 // 自动全网聚合搜索（关键词）—— 不再需要前端选择平台。
 // 流程：后端自动跨平台发现：单曲交给 Solara 解析为 FLAC；歌手 / 专辑委托网易云；
 // 歌单走「关键词歌单搜索」跨平台聚合（网易云可用，QQ/酷狗/咪咕 受网络限制时降级）。
@@ -151,45 +168,77 @@ app.get('/api/search', async (req, res) => {
   // 搜索结果数量：前端可选 30/60/100/200，默认 60（上游 Solara 单页上限 30，靠多源+翻页突破）。
   const limit = Math.min(200, Math.max(10, parseInt(String(req.query.limit || ''), 10) || 60));
 
-  const safeSearch = async (adapter, keywords, t, lim) => {
-    try {
-      return { data: await adapter.search(keywords, t, lim), error: null };
-    } catch (e) {
-      console.error(`[search] ${adapter.id} 失败:`, e.message);
-      return { data: { songs: [], playlists: [], artists: [], albums: [] }, error: e.message };
-    }
-  };
+  // 搜索源多选：sources 为逗号分隔的平台 id（如 netease,qq,joox）；缺省或非法 → 全部源。
+  // 这是前端「搜索前选择音乐源」的落地：只召回来被勾选的源，未勾选的完全不打接口。
+  const sourcesParam = String(req.query.sources || '').trim();
+  const chosen = sourcesParam
+    ? Array.from(new Set(sourcesParam.split(',').map((s) => s.trim()).filter((s) => SEARCH_SOURCE_IDS.includes(s))))
+    : SEARCH_SOURCE_IDS.slice();
+  const sources = chosen.length ? chosen : SEARCH_SOURCE_IDS.slice(); // 空数组兜底为全部
 
-  // Solara 编排单曲 / 歌手 / 专辑（关键词歌单单独聚合，见下）。
-  // 单曲搜索跨 Solara + 网易云两路召回：Solara 覆盖 joox/bilibili 等源，
-  // 网易云 cloudsearch 召回质量更高（经典老歌原唱不易被翻唱淹没），两者合并后
-  // 由 resolveFlac 按「歌名+歌手」去重并统一取直链。
-  // 三类上游（Solara 委托 / 网易云直连 / 关键词歌单）全部并行、互不等待：
-  // 此前歌单搜索是串行 await 在单曲之后，等于把「最慢的歌单源」直接叠加到总耗时上。
-  const [solaraRes, neRes, plRes] = await Promise.all([
-    safeSearch(solaraAdapter, q, type, limit),
-    // 网易云直连稳定且快，始终拉满其 100 首曲库池作为可靠底池；
-    // 最终由 resolveFlac(limit) 按用户选择的数量截断。这样即便 Solara 抖动，
-    // 默认 60 也能稳定返回约 60 首（Solara 不可用时自动用 netease 直连补 MP3）。
-    safeSearch(neteaseAdapter, q, type, Math.max(limit, 100)),
-    type === 'all' || type === 'playlist'
-      ? searchPlaylists(q, limit).catch((e) => {
-          console.error('[search] 歌单搜索失败:', e.message);
-          return [];
-        })
-      : Promise.resolve([]),
-  ]);
+  const needSongs = type === 'all' || type === 'song';
+  const needPlaylists = type === 'all' || type === 'playlist';
+
+  // —— 并行召回各选中源 ——
+  // 网易云：单曲 / 歌单 / 歌手 / 专辑 四类全覆盖（直接调 cloudsearch，快且稳）。
+  // Joox / 哔哩哔哩：仅单曲，经 Solara 按源搜索（这两个源在 Solara 里与 netease 分离，需单独召回）。
+  // 歌单：QQ / 咪咕 / 酷狗 由 searchPlaylists 按源聚合（网易云歌单已含在上面的 netease 直连里）。
+  // 所有上游并行、互不等待；各自带独立硬超时，整体受下方 15s 安全网兜底。
+  const tasks = [];
+  if (sources.includes('netease')) {
+    tasks.push(
+      (async () => {
+        try {
+          const data = await neteaseAdapter.search(q, type, Math.max(limit, 100));
+          return { kind: 'ne', data, error: null };
+        } catch (e) {
+          console.error('[search] 网易云 失败:', e.message);
+          return { kind: 'ne', data: { songs: [], playlists: [], artists: [], albums: [] }, error: e.message };
+        }
+      })()
+    );
+  }
+  if (needPlaylists) {
+    const plSources = ['qq', 'migu'].filter((s) => sources.includes(s));
+    if (plSources.length) {
+      tasks.push(
+        (async () => {
+          try {
+            // 网易云歌单已含在上面的 netease 直连里，这里只补 QQ/咪咕/酷狗，避免重复拉取。
+            const data = await searchPlaylists(q, limit, plSources);
+            return { kind: 'playlists', data, error: null };
+          } catch (e) {
+            console.error('[search] 歌单搜索失败:', e.message);
+            return { kind: 'playlists', data: [], error: e.message };
+          }
+        })()
+      );
+    } else {
+      tasks.push(Promise.resolve({ kind: 'playlists', data: [], error: null }));
+    }
+  }
+
+  const settled = await Promise.all(tasks);
   const aggregated = { songs: [], playlists: [], artists: [], albums: [] };
-  aggregated.songs.push(...(solaraRes.data.songs || []), ...(neRes.data.songs || []));
-  aggregated.playlists.push(...(solaraRes.data.playlists || []), ...(plRes || []));
-  aggregated.artists.push(...(solaraRes.data.artists || []), ...(neRes.data.artists || []));
-  aggregated.albums.push(...(solaraRes.data.albums || []), ...(neRes.data.albums || []));
+  const upstreamErrors = [];
+  for (const r of settled) {
+    if (r.kind === 'ne') {
+      aggregated.songs.push(...(r.data.songs || []));
+      aggregated.playlists.push(...(r.data.playlists || []));
+      aggregated.artists.push(...(r.data.artists || []));
+      aggregated.albums.push(...(r.data.albums || []));
+      if (r.error) upstreamErrors.push('网易云: ' + r.error);
+    } else if (r.kind === 'joox' || r.kind === 'bilibili') {
+      aggregated.songs.push(...(r.data || []));
+      if (r.error) upstreamErrors.push((r.kind === 'joox' ? 'Joox' : '哔哩哔哩') + ': ' + r.error);
+    } else if (r.kind === 'playlists') {
+      aggregated.playlists.push(...(r.data || []));
+      if (r.error) upstreamErrors.push('歌单搜索: ' + r.error);
+    }
+  }
 
   // 上游降级提示：所有源都失败/为空时，附上真实错误原因返回给前端，
   // 避免与「真的没搜到结果」混淆（此前此类失败被静默吞掉）。
-  const upstreamErrors = [];
-  if (neRes.error) upstreamErrors.push('网易云: ' + neRes.error);
-  if (solaraRes.error) upstreamErrors.push('Solara: ' + solaraRes.error);
   if (aggregated.songs.length === 0 && upstreamErrors.length) {
     aggregated.degraded = true;
     aggregated.reason = upstreamErrors.join('；');
