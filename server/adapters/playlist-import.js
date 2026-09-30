@@ -45,13 +45,22 @@ export function isPlaylistUrl(text) {
   return /^https?:\/\//i.test(text.trim()) || /\.(com|cn|net|fm)\//i.test(text.trim());
 }
 
-async function fetchText(url, headers = {}) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': UA, Accept: 'application/json, text/html, */*', ...headers },
-    redirect: 'follow',
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+async function fetchText(url, headers = {}, timeoutMs = 8000) {
+  // 硬超时：fetch 默认无超时，受限网络下单个上游挂起会一直等下去。
+  // 关键词歌单搜索会并发打 QQ / 酷狗 / 咪咕，任一挂起都会拖垮整次搜索（触发上层安全网）。
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': UA, Accept: 'application/json, text/html, */*', ...headers },
+      redirect: 'follow',
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // 处理 QQ 等接口返回的相对协议 / 相对路径图片地址
@@ -362,7 +371,7 @@ async function qqSearchPlaylists(keywords, limit = 30) {
     '&page_no=0&num_per_page=' + limit + '&query=' + encodeURIComponent(keywords);
   let txt;
   try {
-    txt = await fetchText(url, { Referer: 'https://y.qq.com/' });
+    txt = await fetchText(url, { Referer: 'https://y.qq.com/' }, 6000);
   } catch (e) { return []; }
   // 剥掉 JSONP 外壳：MusicJsonCallback({...})
   const m = txt.match(/^\s*MusicJsonCallback\(([\s\S]*)\)\s*;?\s*$/);
@@ -390,7 +399,7 @@ async function kgSearchPlaylists(keywords, limit = 30) {
   const txt = await fetchText(url, {
     Referer: 'https://www.kugou.com/',
     Accept: 'application/json',
-  });
+  }, 5000);
   let data;
   try { data = JSON.parse(txt); } catch { return []; }
   const list = (data && data.data && data.data.lists) || [];
@@ -417,7 +426,9 @@ async function miguSearchPlaylists(keywords, limit = 30) {
         pageNo: '1',
         pageSize: String(limit),
         searchSwitch: '{"song":0,"album":0,"singer":0,"songlist":1,"mv":0,"lyric":0}',
-      }
+      },
+      // 关键词歌单搜索属次要信息，收紧为 5s/不重试（默认 12s×3 最坏可达 36s+，会拖垮整次搜索）
+      { timeout: 5000, retries: 1 }
     );
     const sl = (data && data.songListResultData) || {};
     const list = sl.result || [];

@@ -103,26 +103,6 @@ function nameScore(qn, cn) {
   return 0;
 }
 
-// 把 netease 适配器返回的结果重新标 platform='solara'
-function remapPlatform(list, setSrc) {
-  return (list || []).map((x) => ({
-    ...x,
-    platform: 'solara',
-    ...(setSrc ? { src: 'netease' } : {}),
-  }));
-}
-
-async function delegateSearch(keywords, type) {
-  const r = await neteaseAdapter.search(keywords, type);
-  // Solara 不再搜单曲（已删除 joox/bilibili 慢源，单曲完全由后端并行的网易云直连覆盖），
-  // 故此处只取歌手 / 专辑 / 歌单三类返回给上层。
-  return {
-    playlists: remapPlatform(r.playlists),
-    artists: remapPlatform(r.artists),
-    albums: remapPlatform(r.albums),
-  };
-}
-
 async function playlistDetail(id) {
   const d = await neteaseAdapter.playlistDetail(id);
   // 歌单内曲目统一解析为 Solara 的 FLAC 直链（只保留可获取 FLAC 的）。
@@ -318,24 +298,11 @@ export const solaraAdapter = {
   id: 'solara',
   name: 'Solara 跳板',
   connected: true, // 外部公共服务，无需本地依赖
-  async search(keywords, type, limit) {
-    // Solara 在此只负责「歌手 / 专辑」委托给网易云直连（delegateSearch）；
-    // 单曲召回完全由后端并行的「网易云直连」(neRes) 覆盖（更快且自带封面），
-    // 不再经 Solara 跳板搜 joox/bilibili 慢源（每首需回查+封面，阻塞 ~10s 却只补极少独有曲目）。
-    // 歌单统一走「分享地址导入」，不再做关键词歌单搜索。
-    if (type === 'artist') {
-      const rest = await delegateSearch(keywords, 'artist');
-      return { songs: [], playlists: [], artists: rest.artists, albums: [] };
-    }
-    if (type === 'album') {
-      const rest = await delegateSearch(keywords, 'album');
-      return { songs: [], playlists: [], artists: [], albums: rest.albums };
-    }
-    if (type === 'all') {
-      const rest = await delegateSearch(keywords, 'all');
-      return { songs: [], playlists: [], artists: rest.artists, albums: rest.albums };
-    }
-    // type === 'song' / 'playlist' 等：单曲交给 neRes，关键词不返回歌单
+  async search() {
+    // 单曲 / 歌单 / 歌手 / 专辑 的召回全部由后端并行的「网易云直连」(neRes) 覆盖，
+    // 此处不再委托 netease 重复搜索：此前 type=all 会让 cloudsearch 被重复调用约 8 次
+    // （Solara 委托 4 类 + 外层直连 4 类，两侧结果高度冗余），慢网络下叠加阻塞，
+    // 直接把整次搜索拖过安全网 → timeout。保留空实现以兼容调用方（上层按平台合并）。
     return { songs: [], playlists: [], artists: [], albums: [] };
   },
   songUrl,

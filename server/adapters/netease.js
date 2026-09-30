@@ -13,6 +13,11 @@ try {
 
 const API_BASE = 'https://music.163.com';
 
+// 网易云接口单次硬超时。NeteaseCloudMusicApi 内部请求未设短超时，NAS 等受限网络下
+// 单次 cloudsearch 可能挂数十秒，进而拖垮整次聚合搜索（触发上层安全网 → timeout）。
+// 故在 call() 外层强制超时，快速失败交由上层降级/兜底。可用 NC_TIMEOUT_MS 覆盖。
+const NC_CALL_TIMEOUT_MS = Math.max(3000, parseInt(process.env.NC_TIMEOUT_MS || '10000', 10) || 10000);
+
 function resolveRoute(name) {
   if (!NC) return null;
   if (typeof NC[name] === 'function') return NC[name];
@@ -25,9 +30,21 @@ async function call(name, query = {}) {
   if (!fn) throw new Error(`NeteaseCloudMusicApi 路由 ${name} 不可用`);
   // NeteaseCloudMusicApi 的路由函数签名为 (query, request)，直接接收参数对象，
   // 返回 { status, body, cookie }。不要套 { query } 外层，否则会报「参数错误」。
-  const res = await fn(query);
-  if (res && typeof res === 'object' && 'body' in res) return res.body;
-  return res;
+  // 硬超时：见 NC_CALL_TIMEOUT_MS 注释（防止单次请求长时间挂起拖垮整次搜索）。
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(
+      () => rej(new Error(`网易云接口超时(>${NC_CALL_TIMEOUT_MS}ms): ${name}`)),
+      NC_CALL_TIMEOUT_MS
+    );
+  });
+  try {
+    const res = await Promise.race([Promise.resolve(fn(query)), timeout]);
+    if (res && typeof res === 'object' && 'body' in res) return res.body;
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // br(bps) → 音质等级（v1 接口用 level 而非 br）

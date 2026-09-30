@@ -130,13 +130,13 @@ app.get('/api/search', async (req, res) => {
     return importPlaylistRoute(req, res);
   }
 
-  // 防御性总超时：内部已对 Solara 请求收紧超时（6s 不重试）+ resolveFlac 设 10s
-  // deadline，正常搜索在 ~16s 内返回；此安全网仅防上游极端卡死导致前端无限 loading。
+  // 防御性总超时：各上游均已设独立硬超时（netease 10s / Solara 6s / 歌单源 5~6s）
+  // 且全部并行，正常搜索约 10s 内返回；此安全网仅防上游极端卡死导致前端无限 loading。
   const safetyTimer = setTimeout(() => {
     if (!res.headersSent) {
       res.status(200).json({ songs: [], playlists: [], artists: [], albums: [], degraded: true, reason: 'timeout' });
     }
-  }, 20000);
+  }, 15000);
 
   const type = String(req.query.type || 'all');
   // 搜索结果数量：前端可选 30/60/100/200，默认 60（上游 Solara 单页上限 30，靠多源+翻页突破）。
@@ -155,18 +155,26 @@ app.get('/api/search', async (req, res) => {
   // 单曲搜索跨 Solara + 网易云两路召回：Solara 覆盖 joox/bilibili 等源，
   // 网易云 cloudsearch 召回质量更高（经典老歌原唱不易被翻唱淹没），两者合并后
   // 由 resolveFlac 按「歌名+歌手」去重并统一取直链。
-  const [solaraRes, neRes] = await Promise.all([
+  // 三类上游（Solara 委托 / 网易云直连 / 关键词歌单）全部并行、互不等待：
+  // 此前歌单搜索是串行 await 在单曲之后，等于把「最慢的歌单源」直接叠加到总耗时上。
+  const [solaraRes, neRes, plRes] = await Promise.all([
     safeSearch(solaraAdapter, q, type, limit),
     // 网易云直连稳定且快，始终拉满其 100 首曲库池作为可靠底池；
     // 最终由 resolveFlac(limit) 按用户选择的数量截断。这样即便 Solara 抖动，
     // 默认 60 也能稳定返回约 60 首（Solara 不可用时自动用 netease 直连补 MP3）。
     safeSearch(neteaseAdapter, q, type, Math.max(limit, 100)),
+    type === 'all' || type === 'playlist'
+      ? searchPlaylists(q, limit).catch((e) => {
+          console.error('[search] 歌单搜索失败:', e.message);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
   const aggregated = { songs: [], playlists: [], artists: [], albums: [] };
   aggregated.songs.push(...(solaraRes.data.songs || []), ...(neRes.data.songs || []));
-  aggregated.playlists.push(...(solaraRes.data.playlists || []));
-  aggregated.artists.push(...(solaraRes.data.artists || []));
-  aggregated.albums.push(...(solaraRes.data.albums || []));
+  aggregated.playlists.push(...(solaraRes.data.playlists || []), ...(plRes || []));
+  aggregated.artists.push(...(solaraRes.data.artists || []), ...(neRes.data.artists || []));
+  aggregated.albums.push(...(solaraRes.data.albums || []), ...(neRes.data.albums || []));
 
   // 上游降级提示：所有源都失败/为空时，附上真实错误原因返回给前端，
   // 避免与「真的没搜到结果」混淆（此前此类失败被静默吞掉）。
@@ -176,17 +184,6 @@ app.get('/api/search', async (req, res) => {
   if (aggregated.songs.length === 0 && upstreamErrors.length) {
     aggregated.degraded = true;
     aggregated.reason = upstreamErrors.join('；');
-  }
-
-  // 关键词歌单搜索：跨平台聚合（仅 all / playlist 类型）。网易云可用；
-  // QQ/酷狗/咪咕 受网络反爬限制时各自抛错被吞，不影响其它平台与单曲结果。
-  if (type === 'all' || type === 'playlist') {
-    try {
-      const pls = await searchPlaylists(q, limit);
-      aggregated.playlists.push(...pls);
-    } catch (e) {
-      console.error('[search] 歌单搜索失败:', e.message);
-    }
   }
 
   // 单曲解析策略：默认「前端按需解析」（resolve=0）——搜索阶段只聚合去重即返回，
