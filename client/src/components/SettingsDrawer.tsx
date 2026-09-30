@@ -12,6 +12,8 @@ interface SettingsDrawerProps {
   historyCount: number;
   onClearDownloads: () => void;
   onClearHistory: () => void;
+  downloadMode: 'nas' | 'local';
+  onDownloadModeChange: (m: 'nas' | 'local') => void;
 }
 
 const LIMIT_OPTIONS = [30, 60, 100, 200];
@@ -26,6 +28,8 @@ export default function SettingsDrawer({
   historyCount,
   onClearDownloads,
   onClearHistory,
+  downloadMode,
+  onDownloadModeChange,
 }: SettingsDrawerProps) {
   useEffect(() => {
     if (!open) return;
@@ -69,6 +73,27 @@ export default function SettingsDrawer({
                   {LIMIT_OPTIONS.map((n) => (
                     <option key={n} value={n}>{n} 条</option>
                   ))}
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section className="set-group">
+            <h3 className="set-group__title">下载</h3>
+            <div className="set-row">
+              <div className="set-row__text">
+                <span className="set-row__label">下载方式</span>
+                <span className="set-row__hint">保存到 NAS：文件直接写入服务器挂载目录（默认 /data/music），可被 SMB / Emby / Plex 直接扫描；下载到本机：由浏览器下载到当前设备。</span>
+              </div>
+              <div className="set-row__control">
+                <select
+                  className="set-select"
+                  value={downloadMode}
+                  onChange={(e) => onDownloadModeChange(e.target.value as 'nas' | 'local')}
+                  aria-label="下载方式"
+                >
+                  <option value="nas">保存到 NAS</option>
+                  <option value="local">下载到本机</option>
                 </select>
               </div>
             </div>

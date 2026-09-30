@@ -3,7 +3,7 @@ import cors from 'cors';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, createWriteStream, mkdir } from 'node:fs';
 import { adapters, adapterMap, listPlatforms } from './adapters/index.js';
 import { solaraAdapter, resolveFlac } from './adapters/solara.js';
 import { neteaseAdapter } from './adapters/netease.js';
@@ -210,6 +210,73 @@ app.get('/api/play', async (req, res) => {
 // 下载代理（附附件头）
 app.get('/api/download', async (req, res) => {
   await pipeMedia(req, res, true);
+});
+
+// 保存到服务器目录（部署在 NAS 时直接落盘到挂载目录）：把音频流写入 SAVE_DIR，
+// 文件名取「歌名 - 歌手.ext」，重名则跳过，返回 saved/skipped/error。
+const SAVE_DIR = process.env.SAVE_DIR || '/data/music';
+
+app.get('/api/save', async (req, res) => {
+  const { platform, id, src, title, artist } = req.query;
+  const adapter = adapterMap[String(platform)];
+  if (!adapter || !adapter.connected) {
+    return res.status(404).json({ status: 'error', error: '平台未接入' });
+  }
+  let url;
+  try {
+    // 与播放/下载一致：netease 自身直链仅为试听片段，统一改走 Solara 跳板取完整 FLAC 直链。
+    if (platform === 'netease') {
+      url = await solaraAdapter.rawUrl(String(id), src ? String(src) : 'netease');
+    } else {
+      url = await adapter.rawUrl(String(id), src ? String(src) : undefined);
+    }
+  } catch {
+    url = null;
+  }
+  if (!url) return res.status(404).json({ status: 'error', error: '未获取到直链' });
+
+  try {
+    const safe = (s) => String(s || '未知').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+    let ext = '';
+    try {
+      const um = new URL(url).pathname.match(/\.([a-z0-9]+)$/i);
+      if (um) ext = '.' + um[1].toLowerCase();
+    } catch {}
+    if (!ext) ext = '.flac';
+    const base = `${safe(title)} - ${safe(artist)}`;
+    const filePath = join(SAVE_DIR, base + ext);
+    // 文件名已去除所有路径分隔符，仍做一道越界兜底
+    if (!filePath.startsWith(join(SAVE_DIR, '/'))) {
+      return res.status(400).json({ status: 'error', error: '非法文件名' });
+    }
+    if (existsSync(filePath)) {
+      return res.json({ status: 'skipped', file: base + ext });
+    }
+    await mkdir(SAVE_DIR, { recursive: true });
+    const upstream = await fetch(url, {
+      headers: {
+        Referer: 'https://music.163.com/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      },
+    });
+    if (!upstream.ok && upstream.status !== 206) {
+      return res.status(502).json({ status: 'error', error: `上游返回 ${upstream.status}` });
+    }
+    if (!upstream.body) {
+      return res.status(502).json({ status: 'error', error: '上游无响应体' });
+    }
+    await new Promise((resolve, reject) => {
+      const ws = createWriteStream(filePath);
+      const rs = Readable.fromWeb(upstream.body);
+      rs.on('error', reject);
+      ws.on('error', reject);
+      ws.on('finish', resolve);
+      rs.pipe(ws);
+    });
+    return res.json({ status: 'saved', file: base + ext });
+  } catch (e) {
+    return res.status(500).json({ status: 'error', error: e.message || '保存失败' });
+  }
 });
 
 async function pipeMedia(req, res, asAttachment) {

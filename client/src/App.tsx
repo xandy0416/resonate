@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Platform, ResultTab, SearchResults, Song, Playlist, Artist, Album, CollectionDetail, DrawerTab, CollectionKind } from './types';
 import {
-  fetchPlatforms, search, importPlaylist, fetchPlaylistDetail, fetchArtistSongs, fetchAlbumSongs, playUrl, downloadUrl, resolveSongUrl,
+  fetchPlatforms, search, importPlaylist, fetchPlaylistDetail, fetchArtistSongs, fetchAlbumSongs, playUrl, downloadUrl, resolveSongUrl, saveSong,
 } from './api';
 import Nav from './components/Nav';
 import Hero from './components/Hero';
@@ -29,6 +29,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ResultTab>('song');
   const [resultLimit, setResultLimit] = useState<number>(60);
+  // 下载方式：nas = 服务端落盘到挂载目录（部署在 NAS 时文件直接进 NAS）；local = 浏览器本机下载。
+  const [downloadMode, setDownloadMode] = usePersistentState<'nas' | 'local'>('resonate.downloadMode', 'nas');
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -369,6 +371,10 @@ export default function App() {
       pushToast('该曲目无可用音源', 'error');
       return;
     }
+    if (downloadMode === 'nas') {
+      await nasSaveOne(s);
+      return;
+    }
     triggerOneDownload(s);
     const key = `${s.platform}-${s.id}-${Date.now()}`;
     setDownloadingIds((prev) => new Set(prev).add(s.id));
@@ -407,6 +413,10 @@ export default function App() {
       pushToast('所选曲目暂无可下载音源', 'error');
       return;
     }
+    if (downloadMode === 'nas') {
+      await nasSaveMany(available);
+      return;
+    }
     const ids = available.map((s) => s.id);
     const now = Date.now();
     setDownloadingIds((prev) => new Set([...prev, ...ids]));
@@ -434,6 +444,107 @@ export default function App() {
         d.map((it) => (ids.includes(it.songId as string) ? { ...it, status: '已完成' as const } : it))
       );
     }, 2500);
+  }
+
+  // 并发池：以 limit 为并发上限依次消费 items，fn(item, idx) 可异步。
+  async function runPool<T>(
+    items: T[],
+    limit: number,
+    fn: (item: T, idx: number) => Promise<void>
+  ): Promise<void> {
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (cursor < items.length) {
+        const idx = cursor++;
+        await fn(items[idx], idx);
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  // 单首保存到 NAS（服务端落盘到挂载目录）。
+  async function nasSaveOne(s: Song) {
+    const artist = s.artist || '未知';
+    const key = `${s.platform}-${s.id}-${Date.now()}`;
+    setDownloadingIds((prev) => new Set(prev).add(s.id));
+    setDownloads((d) => [
+      { id: key, title: s.title || '音频', status: '下载中' as const, at: Date.now(), songId: s.id },
+      ...d,
+    ].slice(0, 50));
+    pushToast(`正在保存到 NAS：${s.title || '音频'}`);
+    const r = await saveSong(s.platform, s.id, s.title || '音频', artist, s.src);
+    setDownloadingIds((prev) => {
+      const n = new Set(prev);
+      n.delete(s.id);
+      return n;
+    });
+    let status: DownloadItem['status'];
+    let tone: Toast['tone'];
+    let msg: string;
+    if (r.status === 'saved') {
+      status = '已保存';
+      tone = 'ok';
+      msg = `已保存到 NAS：${r.file}`;
+    } else if (r.status === 'skipped') {
+      status = '已存在';
+      tone = 'ok';
+      msg = `NAS 已存在，跳过：${r.file}`;
+    } else {
+      status = '保存失败';
+      tone = 'error';
+      msg = `NAS 保存失败：${r.error || '未知错误'}`;
+    }
+    setDownloads((d) => d.map((it) => (it.id === key ? { ...it, status } : it)));
+    pushToast(msg, tone);
+  }
+
+  // 批量保存到 NAS：并发 4 路落盘，结束后汇总结果。
+  async function nasSaveMany(songs: Song[]) {
+    const now = Date.now();
+    const ids = songs.map((s) => s.id);
+    const keys = songs.map(
+      (s) => `${s.platform}-${s.id}-${now}-${Math.random().toString(36).slice(2, 7)}`
+    );
+    setDownloadingIds((prev) => new Set([...prev, ...ids]));
+    setDownloads((d) => [
+      ...songs.map((s, i) => ({
+        id: keys[i],
+        title: s.title || '音频',
+        status: '下载中' as const,
+        at: now,
+        songId: s.id,
+      })),
+      ...d,
+    ].slice(0, 50));
+    pushToast(`正在向 NAS 保存 ${songs.length} 首…`);
+    let saved = 0;
+    let skipped = 0;
+    let failed = 0;
+    await runPool(songs, 4, async (s, i) => {
+      const r = await saveSong(s.platform, s.id, s.title || '音频', s.artist || '未知', s.src);
+      let st: DownloadItem['status'];
+      if (r.status === 'saved') {
+        st = '已保存';
+        saved++;
+      } else if (r.status === 'skipped') {
+        st = '已存在';
+        skipped++;
+      } else {
+        st = '保存失败';
+        failed++;
+      }
+      setDownloads((d) => d.map((it) => (it.id === keys[i] ? { ...it, status: st } : it)));
+    });
+    setDownloadingIds((prev) => {
+      const n = new Set(prev);
+      ids.forEach((id) => n.delete(id));
+      return n;
+    });
+    const parts: string[] = [];
+    if (saved) parts.push(`保存 ${saved}`);
+    if (skipped) parts.push(`已存在 ${skipped}`);
+    if (failed) parts.push(`失败 ${failed}`);
+    pushToast(`NAS 保存完成：${parts.join(' / ')}`, failed ? 'error' : 'ok');
   }
 
   return (
@@ -535,6 +646,8 @@ export default function App() {
         platforms={platforms}
         downloadCount={downloads.length}
         historyCount={history.length}
+        downloadMode={downloadMode}
+        onDownloadModeChange={setDownloadMode}
         onClearDownloads={() => {
           setDownloads([]);
           pushToast('已清空下载记录');

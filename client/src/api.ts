@@ -94,6 +94,45 @@ export function downloadUrl(platform: string, id: string, title: string, src?: s
   return `${BASE}/download?${p.toString()}`;
 }
 
+// 保存到 NAS：返回服务端落盘代理地址（仅当后端挂载了目录时有效）。
+export function saveUrl(platform: string, id: string, title: string, artist: string, src?: string): string {
+  const p = new URLSearchParams({ platform, id, title, artist });
+  if (src) p.set('src', src);
+  return `${BASE}/save?${p.toString()}`;
+}
+
+export interface SaveResult {
+  status: 'saved' | 'skipped' | 'error';
+  file?: string;
+  error?: string;
+}
+
+// 调用 /api/save 把音频流直接写入服务器挂载目录，返回保存结果。
+export async function saveSong(
+  platform: string,
+  id: string,
+  title: string,
+  artist: string,
+  src?: string
+): Promise<SaveResult> {
+  try {
+    const res = await fetch(saveUrl(platform, id, title, artist, src));
+    if (!res.ok) {
+      let msg = `保存失败（${res.status}）`;
+      try {
+        const j = (await res.json()) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        /* ignore */
+      }
+      return { status: 'error', error: msg };
+    }
+    return (await res.json()) as SaveResult;
+  } catch (e) {
+    return { status: 'error', error: e instanceof Error ? e.message : '网络错误' };
+  }
+}
+
 // 工具：毫秒 → m:ss
 export function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '—';

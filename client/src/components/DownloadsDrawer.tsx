@@ -4,7 +4,7 @@ import { CloseIcon, TrashIcon } from './Icons';
 export interface DownloadItem {
   id: string;
   title: string;
-  status: '下载中' | '已完成';
+  status: '下载中' | '已完成' | '已保存' | '已存在' | '保存失败';
   at: number; // 时间戳（毫秒）
   songId?: string; // 对应曲目 id，用于批量下载完成后统一标记（旧记录无此字段）
 }
