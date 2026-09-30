@@ -59,5 +59,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # ACR 个人版不支持 buildx 默认生成的 provenance/sbom 空 attestation manifest
+          # (application/vnd.oci.empty.v1+json)，关闭后推送才能成功
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
