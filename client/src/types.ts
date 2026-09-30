@@ -56,6 +56,9 @@ export interface SearchResults {
   playlists: Playlist[];
   artists: Artist[];
   albums: Album[];
+  // 上游服务不可达时的降级标记与真实原因（避免与「真的没结果」混淆）。
+  degraded?: boolean;
+  reason?: string;
 }
 
 export interface PlaylistDetail extends Playlist {

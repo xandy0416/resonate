@@ -562,6 +562,14 @@ a { color: inherit; }
   border-radius: var(--radius-md);
   background: color-mix(in oklab, var(--color-accent) 8%, transparent);
 }
+/* 上游不可达（degraded）空状态：用警示色提示，区别于「真没结果」。 */
+.empty--error .empty__title { color: #d6453d; }
+.empty--error .empty__hint { color: var(--color-ink); }
+.empty--error .empty__note {
+  color: var(--color-muted);
+  border-color: color-mix(in oklab, #d6453d 35%, transparent);
+  background: color-mix(in oklab, #d6453d 8%, transparent);
+}
 
 .skeleton {
   background: linear-gradient(90deg, var(--color-paper-2) 25%, var(--color-paper-3) 37%, var(--color-paper-2) 63%);

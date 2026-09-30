@@ -7,6 +7,7 @@ try {
   // 该包把每个路由导出为 `(options) => Promise<{ status, body, ... }>` 的函数。
   NC = await import('NeteaseCloudMusicApi');
 } catch (e) {
+  console.error('[netease] NeteaseCloudMusicApi 导入失败（搜索/播放将无法使用）:', e && (e.stack || e.message));
   NC = null;
 }
 
@@ -170,6 +171,12 @@ export const neteaseAdapter = {
     if (type === 'all' || type === 'artist') tasks.push(searchArtists(keywords, limit).then((v) => ['artists', v]));
     if (type === 'all' || type === 'album') tasks.push(searchAlbums(keywords, limit).then((v) => ['albums', v]));
     const settled = await Promise.allSettled(tasks);
+    const rejected = settled.filter((s) => s.status === 'rejected');
+    // 所有类别搜索都失败（例如包未装上、网络不可达、上游风控）→ 向上抛错，
+    // 交由上层 /api/search 标记为 degraded 并展示真实原因，而非静默返回空结果。
+    if (settled.length > 0 && rejected.length === settled.length) {
+      throw new Error(rejected[0].reason?.message || String(rejected[0].reason || '网易云搜索不可用'));
+    }
     const out = { songs: [], playlists: [], artists: [], albums: [] };
     for (const s of settled) {
       if (s.status === 'fulfilled') out[s.value[0]] = s.value[1];

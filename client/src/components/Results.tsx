@@ -131,7 +131,7 @@ function TabBody({
   query: string;
 }) {
   if (tab === 'song') {
-    if (results.songs.length === 0) return <EmptyTab query={query} noun="单曲" />;
+    if (results.songs.length === 0) return <EmptyTab query={query} noun="单曲" degraded={results.degraded} reason={results.reason} />;
     return (
       <SongList
         songs={results.songs}
@@ -145,7 +145,7 @@ function TabBody({
   }
 
   if (tab === 'playlist') {
-    if (results.playlists.length === 0) return <EmptyTab query={query} noun="歌单" />;
+    if (results.playlists.length === 0) return <EmptyTab query={query} noun="歌单" degraded={results.degraded} reason={results.reason} />;
     return (
       <div className="card-grid">
         {results.playlists.map((p) => (
@@ -161,7 +161,7 @@ function TabBody({
   }
 
   if (tab === 'artist') {
-    if (results.artists.length === 0) return <EmptyTab query={query} noun="歌手" />;
+    if (results.artists.length === 0) return <EmptyTab query={query} noun="歌手" degraded={results.degraded} reason={results.reason} />;
     return (
       <div className="card-grid">
         {results.artists.map((a) => (
@@ -177,7 +177,7 @@ function TabBody({
   }
 
   if (tab === 'album') {
-    if (results.albums.length === 0) return <EmptyTab query={query} noun="专辑" />;
+    if (results.albums.length === 0) return <EmptyTab query={query} noun="专辑" degraded={results.degraded} reason={results.reason} />;
     return (
       <div className="card-grid">
         {results.albums.map((al) => (
@@ -214,7 +214,16 @@ function SkeletonBody({ tab }: { tab: ResultTab }) {
   );
 }
 
-function EmptyTab({ query, noun }: { query: string; noun: string }) {
+function EmptyTab({ query, noun, degraded, reason }: { query: string; noun: string; degraded?: boolean; reason?: string }) {
+  if (degraded) {
+    return (
+      <div className="empty empty--error">
+        <p className="empty__title">上游音乐源暂时不可达</p>
+        <p className="empty__hint">搜索请求未能从音乐源返回结果。常见原因：部署容器的网络/DNS 受限，或 music.163.com / music-api.gdstudio.xyz 被拦截。</p>
+        <p className="empty__note empty__note--info">错误详情：{reason || '未知（上游无响应）'}</p>
+      </div>
+    );
+  }
   return (
     <div className="empty">
       <p className="empty__title">没有找到相关{noun}</p>

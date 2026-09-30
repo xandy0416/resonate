@@ -73,10 +73,10 @@ app.get('/api/search', async (req, res) => {
 
   const safeSearch = async (adapter, keywords, t, lim) => {
     try {
-      return await adapter.search(keywords, t, lim);
+      return { data: await adapter.search(keywords, t, lim), error: null };
     } catch (e) {
       console.error(`[search] ${adapter.id} 失败:`, e.message);
-      return { songs: [], playlists: [], artists: [], albums: [] };
+      return { data: { songs: [], playlists: [], artists: [], albums: [] }, error: e.message };
     }
   };
 
@@ -92,10 +92,20 @@ app.get('/api/search', async (req, res) => {
     safeSearch(neteaseAdapter, q, type, Math.max(limit, 100)),
   ]);
   const aggregated = { songs: [], playlists: [], artists: [], albums: [] };
-  aggregated.songs.push(...(solaraRes.songs || []), ...(neRes.songs || []));
-  aggregated.playlists.push(...(solaraRes.playlists || []));
-  aggregated.artists.push(...(solaraRes.artists || []));
-  aggregated.albums.push(...(solaraRes.albums || []));
+  aggregated.songs.push(...(solaraRes.data.songs || []), ...(neRes.data.songs || []));
+  aggregated.playlists.push(...(solaraRes.data.playlists || []));
+  aggregated.artists.push(...(solaraRes.data.artists || []));
+  aggregated.albums.push(...(solaraRes.data.albums || []));
+
+  // 上游降级提示：所有源都失败/为空时，附上真实错误原因返回给前端，
+  // 避免与「真的没搜到结果」混淆（此前此类失败被静默吞掉）。
+  const upstreamErrors = [];
+  if (neRes.error) upstreamErrors.push('网易云: ' + neRes.error);
+  if (solaraRes.error) upstreamErrors.push('Solara: ' + solaraRes.error);
+  if (aggregated.songs.length === 0 && upstreamErrors.length) {
+    aggregated.degraded = true;
+    aggregated.reason = upstreamErrors.join('；');
+  }
 
   // 关键词歌单搜索：跨平台聚合（仅 all / playlist 类型）。网易云可用；
   // QQ/酷狗/咪咕 受网络反爬限制时各自抛错被吞，不影响其它平台与单曲结果。
