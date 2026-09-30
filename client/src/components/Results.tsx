@@ -93,6 +93,12 @@ export default function Results(props: ResultsProps) {
             ))}
           </div>
 
+          {results.solaraDown && (
+            <div className="banner banner--warn">
+              FLAC 源（曲库跳板）暂不可达，已自动降级为网易云直连（MP3，320kbps）。歌曲可正常播放与下载，仅音质非无损。
+            </div>
+          )}
+
           <TabBody
             tab={activeTab}
             results={results}

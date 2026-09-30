@@ -19,6 +19,19 @@ import { neteaseAdapter } from './netease.js';
 
 const SOLARA_BASE = 'https://music-api.gdstudio.xyz/api.php';
 
+// —— Solara 跳板可用性缓存 ───────────────────────────────────────────────
+// 该跳板是第三方公共服务，稳定性不可控（偶发超时 / 被墙 / 限流）。一旦探测或
+// 实际请求连续失败，就记住「最近 N 分钟内不可用」，期间直接跳过 Solara、走网易云
+// 直连兜底（MP3），避免每次播放/解析都白等 6s 超时。
+let solaraFailStamp = 0;
+const SOLARA_DOWN_TTL = 5 * 60 * 1000; // 5 分钟内视为不可用，过期自动恢复重试
+export function isSolaraLikelyDown() {
+  return solaraFailStamp > 0 && Date.now() - solaraFailStamp < SOLARA_DOWN_TTL;
+}
+export function markSolaraUnreachable() {
+  solaraFailStamp = Date.now();
+}
+
 // —— 请求工具（带超时，不重试） ───────────────────────────────────────────
 // 注：Solara 上游限流时，重试只会把「单次阻塞」翻倍放大（最坏 15s×2=30s/请求），
 // 对可用性毫无帮助。故改为「单次短超时、不重试」，快速失败交由上层降级/兜底。
@@ -39,9 +52,16 @@ async function solaraGet(params, timeoutMs = 6000) {
       signal: ctrl.signal,
     });
     const text = await r.text();
-    try { return JSON.parse(text); } catch { return null; }
+    try {
+      solaraFailStamp = 0; // 一次成功即认为跳板恢复可用
+      return JSON.parse(text);
+    } catch {
+      solaraFailStamp = Date.now(); // 返回非 JSON（被拦截/上游崩）→ 记失败
+      return null;
+    }
   } catch {
-    return null; // 超时或网络错 → 返回 null，由上层降级
+    solaraFailStamp = Date.now(); // 超时或网络错 → 记失败
+    return null;
   } finally {
     clearTimeout(timer);
   }
@@ -121,18 +141,21 @@ async function songUrl(id, src) {
   // Solara 的 types=url 能给出 FLAC（br 900+），优先使用；
   // 仅当 Solara 抖动/超时，才回退到「网易云直连接口」拿 MP3，保证歌曲可用（而非被丢弃）。
   // 超时从 15s 收紧到 6s（不重试），限流时快速失败转回退，避免单首阻塞 30s。
-  const d = await solaraGet({ types: 'url', source, id: String(id) }, 6000);
-  if (d && d.url) {
-    const url = d.url;
-    const size = d.size || null;
-    // 该 API 的 br 字段不稳定（FLAC 有时标成 1），故格式以 URL 后缀优先判定
-    const lower = url.toLowerCase();
-    let format = 'MP3';
-    if (lower.includes('.flac')) format = 'FLAC';
-    else if (lower.includes('.mp3')) format = 'MP3';
-    else if (typeof d.br === 'number' && d.br >= 700) format = 'FLAC';
-    const br = typeof d.br === 'number' && d.br > 1 ? Math.round(d.br / 1000) : null;
-    return { url, size, br, format };
+  // 已知跳板不可达（isSolaraLikelyDown）时直接跳过 Solara，秒走网易云兜底，免去 6s 等待。
+  if (!isSolaraLikelyDown()) {
+    const d = await solaraGet({ types: 'url', source, id: String(id) }, 6000);
+    if (d && d.url) {
+      const url = d.url;
+      const size = d.size || null;
+      // 该 API 的 br 字段不稳定（FLAC 有时标成 1），故格式以 URL 后缀优先判定
+      const lower = url.toLowerCase();
+      let format = 'MP3';
+      if (lower.includes('.flac')) format = 'FLAC';
+      else if (lower.includes('.mp3')) format = 'MP3';
+      else if (typeof d.br === 'number' && d.br >= 700) format = 'FLAC';
+      const br = typeof d.br === 'number' && d.br > 1 ? Math.round(d.br / 1000) : null;
+      return { url, size, br, format };
+    }
   }
   // 回退：网易云直连接口（快且稳，不经 Solara 跳板），多数情况给 320kbps MP3。
   if (source === 'netease') {
@@ -222,7 +245,10 @@ export async function resolveByName(name, artist) {
   const qn = norm(name);
   const qc = coreTitle(name); // 去版本后缀的核心歌名
   const qa = String(artist || '').split('/').map(norm).filter(Boolean);
-  let data = await solaraGet({ types: 'search', source: 'netease', name, count: '10', pages: '1' }, 6000);
+  // 已知跳板不可达时直接跳过 Solara 搜索，走下方网易云兜底链路，避免白等超时。
+  let data = isSolaraLikelyDown()
+    ? []
+    : await solaraGet({ types: 'search', source: 'netease', name, count: '10', pages: '1' }, 6000);
   if (!Array.isArray(data)) data = [];
 
   // 兜底链路：Solara 抖动/限流时（data 为空），改用「网易云直连接口」按名找候选。

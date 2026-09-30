@@ -59,6 +59,8 @@ export interface SearchResults {
   // 上游服务不可达时的降级标记与真实原因（避免与「真的没结果」混淆）。
   degraded?: boolean;
   reason?: string;
+  // 曲库跳板（FLAC 源）暂不可达，已降级为网易云直连（MP3）。
+  solaraDown?: boolean;
 }
 
 export interface PlaylistDetail extends Playlist {

@@ -571,6 +571,20 @@ a { color: inherit; }
   background: color-mix(in oklab, #d6453d 8%, transparent);
 }
 
+/* 结果区顶部降级横幅：曲库跳板不可达、已降级为网易云直连。 */
+.banner {
+  margin: 0 0 var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.banner--warn {
+  border: 1px solid color-mix(in oklab, #e0a100 40%, transparent);
+  background: color-mix(in oklab, #e0a100 12%, transparent);
+  color: color-mix(in oklab, #e0a100 75%, var(--color-ink));
+}
+
 .skeleton {
   background: linear-gradient(90deg, var(--color-paper-2) 25%, var(--color-paper-3) 37%, var(--color-paper-2) 63%);
   background-size: 400% 100%;

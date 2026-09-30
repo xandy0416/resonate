@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { existsSync, createWriteStream, mkdir } from 'node:fs';
 import { promises as dnsPromises } from 'node:dns';
 import { adapters, adapterMap, listPlatforms } from './adapters/index.js';
-import { solaraAdapter, resolveFlac, probe as probeSolara } from './adapters/solara.js';
+import { solaraAdapter, resolveFlac, probe as probeSolara, markSolaraUnreachable, isSolaraLikelyDown } from './adapters/solara.js';
 import { neteaseAdapter, probe as probeNetease } from './adapters/netease.js';
 import { playlistImport, isPlaylistUrl, searchPlaylists, synthesizePlaylistUrl, getArtistSongs, getAlbumSongs } from './adapters/playlist-import.js';
 
@@ -83,7 +83,10 @@ app.get('/api/health', async (req, res) => {
   for (const d of dns) if (!d.ok) verdict.push(`DNS 解析失败：${d.host} → ${d.error}`);
   if (!internet.ok) verdict.push(`容器无法访问公网 → www.baidu.com: ${internet.error}`);
   if (!netease.ok) verdict.push(`网易云搜索不可用 → ${netease.error}`);
-  if (!solara.ok) verdict.push(`曲库跳板不可用 → ${solara.error}`);
+  if (!solara.ok) {
+    verdict.push(`曲库跳板不可用 → ${solara.error}`);
+    markSolaraUnreachable(); // 记下跳板不可用，使后续播放/解析秒走网易云兜底
+  }
 
   res.json({
     ...base,
@@ -205,6 +208,8 @@ app.get('/api/search', async (req, res) => {
       .slice(0, limit);
   }
   aggregated.playlists = dedupeById(aggregated.playlists);
+  // 暴露曲库跳板可用性，便于前端展示「已降级为网易云直连（MP3）」提示。
+  aggregated.solaraDown = isSolaraLikelyDown();
 
   clearTimeout(safetyTimer);
   if (res.headersSent) return; // 已被超时安全网返回，主逻辑结果丢弃
