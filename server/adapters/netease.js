@@ -160,6 +160,24 @@ async function albumSongs(id) {
   return (r?.songs || []).map(mapSong);
 }
 
+// 真实探活：真的调用一次 cloudsearch，验证「依赖可用 + 网络可达 + 上游返回正常」。
+// 注意与 connected（仅表示包已导入）的区别：这里会发出真实网络请求，因此能区分
+// 「包在、但网络不通 / 被风控」与「一切正常」。用于在 NAS 上定位「搜不到歌」的根因。
+export async function probe() {
+  if (!NC) return { ok: false, ms: 0, error: 'NeteaseCloudMusicApi 未加载（依赖缺失）' };
+  const t0 = Date.now();
+  try {
+    const r = await call('cloudsearch', { keywords: '周杰伦', type: 1, limit: 1, offset: 0 });
+    const n = r?.result?.songs?.length ?? 0;
+    const ms = Date.now() - t0;
+    if (n > 0) return { ok: true, ms, sample: n, total: r?.result?.songCount ?? null, error: null };
+    return { ok: false, ms, sample: 0, total: r?.result?.songCount ?? null, error: '请求已到达上游但返回 0 条结果（可能被风控 / 需登录）' };
+  } catch (e) {
+    const code = (e && e.cause && e.cause.code) || (e && e.code) || '';
+    return { ok: false, ms: Date.now() - t0, error: `${code ? code + ': ' : ''}${(e && e.message) || String(e)}` };
+  }
+}
+
 export const neteaseAdapter = {
   id: 'netease',
   name: '网易云音乐',

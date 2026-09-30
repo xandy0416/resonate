@@ -278,6 +278,16 @@ export async function resolveByName(name, artist) {
   };
 }
 
+// 真实探活：对曲库 API 发一次搜索请求，验证网络与上游可用性（区别于静态的 connected）。
+export async function probe() {
+  const t0 = Date.now();
+  const data = await solaraGet({ types: 'search', source: 'netease', name: 'test', count: 1, pages: 1 }, 8000);
+  const ms = Date.now() - t0;
+  if (data === null) return { ok: false, ms, error: '无响应或返回非 JSON（超时 / DNS 解析失败 / 网络不可达）' };
+  const n = Array.isArray(data) ? data.length : 0;
+  return { ok: true, ms, sample: n, error: null };
+}
+
 export const solaraAdapter = {
   id: 'solara',
   name: 'Solara 跳板',

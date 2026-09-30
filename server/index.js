@@ -4,9 +4,10 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync, createWriteStream, mkdir } from 'node:fs';
+import { promises as dnsPromises } from 'node:dns';
 import { adapters, adapterMap, listPlatforms } from './adapters/index.js';
-import { solaraAdapter, resolveFlac } from './adapters/solara.js';
-import { neteaseAdapter } from './adapters/netease.js';
+import { solaraAdapter, resolveFlac, probe as probeSolara } from './adapters/solara.js';
+import { neteaseAdapter, probe as probeNetease } from './adapters/netease.js';
 import { playlistImport, isPlaylistUrl, searchPlaylists, synthesizePlaylistUrl, getArtistSongs, getAlbumSongs } from './adapters/playlist-import.js';
 
 // 全局兜底：各平台适配器都会对外网做 fetch，第三方库/上游偶发异常
@@ -24,9 +25,76 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8787;
 
-// 健康检查
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, platforms: listPlatforms() });
+// 健康检查：默认只返回静态平台状态（轻量、不发外部请求，供容器 HEALTHCHECK 使用）。
+// 加 ?deep=1 时执行「真实探活」：DNS 解析 + 公网连通 + netease/solara 实际搜索请求，
+// 用于在 NAS 上定位「搜不到歌」究竟卡在 DNS / 容器网络 / 上游风控哪一层。
+// 注意：平台的 connected 字段只代表「依赖是否就绪」，并不代表网络可达；只有 deep 探活才发真实请求。
+const DNS_TARGETS = [
+  ['music.163.com', '网易云 API'],
+  ['music-api.gdstudio.xyz', '曲库跳板（Solara / 汽水）'],
+  ['qishui.douyin.com', '汽水分享页'],
+  ['c.y.qq.com', 'QQ 音乐'],
+  ['pd.musicapp.migu.cn', '咪咕音乐'],
+];
+
+async function probeDns(host, timeoutMs = 5000) {
+  const t0 = Date.now();
+  try {
+    const r = await Promise.race([
+      dnsPromises.lookup(host),
+      new Promise((_, rej) =>
+        setTimeout(() => rej(Object.assign(new Error('DNS 查询超时'), { code: 'ETIMEOUT' })), timeoutMs),
+      ),
+    ]);
+    return { ok: true, address: r.address, ms: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, error: e.code || e.message, ms: Date.now() - t0 };
+  }
+}
+
+async function probeHttp(url, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    return { ok: true, status: r.status, ms: Date.now() - t0 };
+  } catch (e) {
+    const code =
+      (e && e.cause && e.cause.code) || (e && e.code) || (e.name === 'AbortError' ? `ETIMEOUT(>${timeoutMs}ms)` : '');
+    return { ok: false, error: `${code ? code + ': ' : ''}${(e && e.message) || String(e)}`, ms: Date.now() - t0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.get('/api/health', async (req, res) => {
+  const base = { ok: true, platforms: listPlatforms() };
+  if (!req.query.deep) return res.json(base);
+
+  const [dns, internet, netease, solara] = await Promise.all([
+    Promise.all(DNS_TARGETS.map(async ([host, label]) => ({ host, label, ...(await probeDns(host)) }))),
+    probeHttp('https://www.baidu.com'),
+    probeNetease(),
+    probeSolara(),
+  ]);
+
+  const verdict = [];
+  for (const d of dns) if (!d.ok) verdict.push(`DNS 解析失败：${d.host} → ${d.error}`);
+  if (!internet.ok) verdict.push(`容器无法访问公网 → www.baidu.com: ${internet.error}`);
+  if (!netease.ok) verdict.push(`网易云搜索不可用 → ${netease.error}`);
+  if (!solara.ok) verdict.push(`曲库跳板不可用 → ${solara.error}`);
+
+  res.json({
+    ...base,
+    deep: {
+      allOk: verdict.length === 0,
+      verdict: verdict.length ? verdict : ['全部正常：域名可解析、公网可达、上游搜索能返回结果。'],
+      dns,
+      internet,
+      adapters: { netease, solara },
+    },
+  });
 });
 
 // 平台列表（含接入状态）

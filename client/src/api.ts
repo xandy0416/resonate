@@ -133,6 +133,39 @@ export async function saveSong(
   }
 }
 
+export interface DeepHealthDns {
+  host: string;
+  label: string;
+  ok: boolean;
+  address?: string;
+  error?: string;
+  ms: number;
+}
+export interface DeepHealthProbe {
+  ok: boolean;
+  ms: number;
+  status?: number;
+  sample?: number;
+  total?: number | null;
+  error?: string | null;
+}
+export interface DeepHealth {
+  ok: boolean;
+  deep: {
+    allOk: boolean;
+    verdict: string[];
+    dns: DeepHealthDns[];
+    internet: DeepHealthProbe;
+    adapters: { netease: DeepHealthProbe; solara: DeepHealthProbe };
+  };
+}
+
+// 连接自检：调用后端真实探活（DNS 解析 / 公网连通 / 上游搜索），
+// 用于定位「搜不到歌」究竟是容器网络、DNS 还是上游风控导致。
+export function deepHealth(): Promise<DeepHealth> {
+  return get<DeepHealth>(`${BASE}/health?deep=1`);
+}
+
 // 工具：毫秒 → m:ss
 export function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '—';

@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { Platform } from '../types';
+import { deepHealth, type DeepHealth } from '../api';
 import { CloseIcon, TrashIcon } from './Icons';
 
 interface SettingsDrawerProps {
@@ -37,6 +38,55 @@ export default function SettingsDrawer({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  // 连接自检：真实请求后端探活，定位「搜不到歌」的网络层原因。
+  const [diag, setDiag] = useState<DeepHealth | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagError, setDiagError] = useState('');
+
+  async function runDiag() {
+    setDiagLoading(true);
+    setDiagError('');
+    try {
+      setDiag(await deepHealth());
+    } catch (e) {
+      setDiag(null);
+      setDiagError(e instanceof Error ? e.message : '自检请求失败');
+    } finally {
+      setDiagLoading(false);
+    }
+  }
+
+  const diagRows: { label: string; ok: boolean; detail: string }[] = [];
+  if (diag) {
+    const d = diag.deep;
+    diagRows.push({
+      label: '公网连通',
+      ok: d.internet.ok,
+      detail: d.internet.ok ? `HTTP ${d.internet.status} · ${d.internet.ms}ms` : d.internet.error || '失败',
+    });
+    diagRows.push({
+      label: '网易云搜索',
+      ok: d.adapters.netease.ok,
+      detail: d.adapters.netease.ok
+        ? `${d.adapters.netease.sample ?? 0} 条命中${d.adapters.netease.total != null ? ` / 共 ${d.adapters.netease.total}` : ''} · ${d.adapters.netease.ms}ms`
+        : d.adapters.netease.error || '失败',
+    });
+    diagRows.push({
+      label: '曲库跳板',
+      ok: d.adapters.solara.ok,
+      detail: d.adapters.solara.ok
+        ? `${d.adapters.solara.sample ?? 0} 条命中 · ${d.adapters.solara.ms}ms`
+        : d.adapters.solara.error || '失败',
+    });
+    for (const x of d.dns) {
+      diagRows.push({
+        label: `DNS ${x.host}`,
+        ok: x.ok,
+        detail: x.ok ? `${x.address} · ${x.ms}ms` : x.error || '失败',
+      });
+    }
+  }
 
   return (
     <>
@@ -155,6 +205,40 @@ export default function SettingsDrawer({
                   </li>
                 ))}
               </ul>
+            </div>
+          </section>
+
+          <section className="set-group">
+            <h3 className="set-group__title">连接自检</h3>
+            <div className="set-row set-row--stack">
+              <div className="set-row__text">
+                <span className="set-row__label">音源连通性</span>
+                <span className="set-row__hint">真实请求各音乐源（DNS 解析 / 公网连通 / 上游搜索），定位「搜不到歌」是网络还是上游问题。</span>
+              </div>
+              <div className="set-row__control">
+                <button type="button" className="set-btn" onClick={runDiag} disabled={diagLoading}>
+                  {diagLoading ? '检测中…' : '开始自检'}
+                </button>
+              </div>
+              {diagError && <p className="set-diag set-diag--bad">自检失败：{diagError}</p>}
+              {diag && (
+                <div className="set-diag-block">
+                  <p className={`set-diag${diag.deep.allOk ? ' set-diag--ok' : ' set-diag--bad'}`}>
+                    {diag.deep.allOk ? '全部正常' : '检测到问题'}
+                  </p>
+                  {diag.deep.verdict.map((v, i) => (
+                    <p className="set-diag__line" key={`v${i}`}>{v}</p>
+                  ))}
+                  <ul className="set-list">
+                    {diagRows.map((r) => (
+                      <li className="set-list__item" key={r.label}>
+                        <span>{r.label}</span>
+                        <span className={`set-dot${r.ok ? ' set-dot--ok' : ''}`}>{r.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
         </div>
