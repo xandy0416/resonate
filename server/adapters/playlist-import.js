@@ -694,7 +694,7 @@ async function importPlaylist(rawUrl) {
 }
 
 // 数量上限：控制单次解析耗时（歌手热门曲目可达上百首）
-const ARTIST_TRACK_LIMIT = 50;
+const ARTIST_TRACK_LIMIT = 100;
 const ALBUM_TRACK_LIMIT = 100;
 // 歌单：放宽到 200，超出部分在详情阶段标记为「待解析」、下载时按需补解析，
 // 避免大歌单被静默截断（详情整体仍有 6s 截止保护，不会拖爆外网反代）。
