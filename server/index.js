@@ -8,7 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import { promises as dnsPromises } from 'node:dns';
 import { adapters, adapterMap, listPlatforms } from './adapters/index.js';
 import { solaraAdapter, resolveFlac, probe as probeSolara, markSolaraUnreachable, isSolaraLikelyDown } from './adapters/solara.js';
-import { neteaseAdapter, probe as probeNetease } from './adapters/netease.js';
+import { neteaseAdapter, probe as probeNetease, probeDetail as probeNeteaseDetail } from './adapters/netease.js';
 import { playlistImport, isPlaylistUrl, searchPlaylists, synthesizePlaylistUrl, getArtistSongs, getAlbumSongs } from './adapters/playlist-import.js';
 
 // 全局兜底：各平台适配器都会对外网做 fetch，第三方库/上游偶发异常
@@ -73,10 +73,11 @@ app.get('/api/health', async (req, res) => {
   const base = { ok: true, platforms: listPlatforms() };
   if (!req.query.deep) return res.json(base);
 
-  const [dns, internet, netease, solara] = await Promise.all([
+  const [dns, internet, netease, neteaseDetail, solara] = await Promise.all([
     Promise.all(DNS_TARGETS.map(async ([host, label]) => ({ host, label, ...(await probeDns(host)) }))),
     probeHttp('https://www.baidu.com'),
     probeNetease(),
+    probeNeteaseDetail(), // 歌单详情专用探活：整张歌单元数据（返回体大，可能比搜索慢一个数量级）
     probeSolara(),
   ]);
 
@@ -84,6 +85,13 @@ app.get('/api/health', async (req, res) => {
   for (const d of dns) if (!d.ok) verdict.push(`DNS 解析失败：${d.host} → ${d.error}`);
   if (!internet.ok) verdict.push(`容器无法访问公网 → www.baidu.com: ${internet.error}`);
   if (!netease.ok) verdict.push(`网易云搜索不可用 → ${netease.error}`);
+  // 搜索可用但详情超时 → 典型「小请求快、大请求慢」的受限网络特征，直接点明，避免与搜索问题混淆。
+  if (netease.ok && !neteaseDetail.ok) {
+    verdict.push(
+      `网易云搜索正常，但歌单详情慢/超时（${neteaseDetail.ms}ms，上限 ${neteaseDetail.timeoutMs}ms）→ ${neteaseDetail.error}。` +
+        `多为容器到 music.163.com 带宽/链路受限，可调大 NC_DETAIL_TIMEOUT_MS 重试。`
+    );
+  }
   if (!solara.ok) {
     verdict.push(`曲库跳板不可用 → ${solara.error}`);
     markSolaraUnreachable(); // 记下跳板不可用，使后续播放/解析秒走网易云兜底
@@ -96,7 +104,7 @@ app.get('/api/health', async (req, res) => {
       verdict: verdict.length ? verdict : ['全部正常：域名可解析、公网可达、上游搜索能返回结果。'],
       dns,
       internet,
-      adapters: { netease, solara },
+      adapters: { netease, neteaseDetail, solara },
     },
   });
 });

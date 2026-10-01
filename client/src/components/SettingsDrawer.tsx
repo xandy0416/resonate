@@ -72,6 +72,16 @@ export default function SettingsDrawer({
         ? `${d.adapters.netease.sample ?? 0} 条命中${d.adapters.netease.total != null ? ` / 共 ${d.adapters.netease.total}` : ''} · ${d.adapters.netease.ms}ms`
         : d.adapters.netease.error || '失败',
     });
+    if (d.adapters.neteaseDetail) {
+      const nd = d.adapters.neteaseDetail;
+      diagRows.push({
+        label: '网易云歌单详情',
+        ok: nd.ok,
+        detail: nd.ok
+          ? `${nd.tracks ?? 0} 首 · ${nd.ms}ms（上限 ${nd.timeoutMs ?? '-'}ms）`
+          : `${nd.error || '失败'}（上限 ${nd.timeoutMs ?? '-'}ms）`,
+      });
+    }
     diagRows.push({
       label: '曲库跳板',
       ok: d.adapters.solara.ok,

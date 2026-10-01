@@ -18,6 +18,15 @@ const API_BASE = 'https://music.163.com';
 // 故在 call() 外层强制超时，快速失败交由上层降级/兜底。可用 NC_TIMEOUT_MS 覆盖。
 const NC_CALL_TIMEOUT_MS = Math.max(3000, parseInt(process.env.NC_TIMEOUT_MS || '10000', 10) || 10000);
 
+// 详情类接口（歌单 playlist_detail / 专辑 album / 歌手 artist_songs）返回体大（可含数百首曲目），
+// 受限网络（如 NAS 外网）下单次请求可能远超搜索用的 10s；若沿用 10s，会导致「元数据都还没拿到
+// 整条详情请求就失败」（表现为前端抽屉报「网易云接口超时(>10000ms): playlist_detail」）。
+// 故给这类接口更宽的预算；搜索仍用较短超时以保持快速失败。可用 NC_DETAIL_TIMEOUT_MS 覆盖。
+const NC_DETAIL_TIMEOUT_MS = Math.max(
+  5000,
+  parseInt(process.env.NC_DETAIL_TIMEOUT_MS || '25000', 10) || 25000
+);
+
 function resolveRoute(name) {
   if (!NC) return null;
   if (typeof NC[name] === 'function') return NC[name];
@@ -25,7 +34,7 @@ function resolveRoute(name) {
   return null;
 }
 
-async function call(name, query = {}) {
+async function call(name, query = {}, timeoutMs = NC_CALL_TIMEOUT_MS) {
   const fn = resolveRoute(name);
   if (!fn) throw new Error(`NeteaseCloudMusicApi 路由 ${name} 不可用`);
   // NeteaseCloudMusicApi 的路由函数签名为 (query, request)，直接接收参数对象，
@@ -34,8 +43,8 @@ async function call(name, query = {}) {
   let timer;
   const timeout = new Promise((_, rej) => {
     timer = setTimeout(
-      () => rej(new Error(`网易云接口超时(>${NC_CALL_TIMEOUT_MS}ms): ${name}`)),
-      NC_CALL_TIMEOUT_MS
+      () => rej(new Error(`网易云接口超时(>${timeoutMs}ms): ${name}`)),
+      timeoutMs
     );
   });
   try {
@@ -57,7 +66,7 @@ function brToLevel(br) {
 
 // 获取单曲播放/下载直链。支持单 id 或逗号分隔多 id。
 // 返回 Map<id, { url, size, br, format }>
-async function fetchSongUrls(ids, br = 320000) {
+async function fetchSongUrls(ids, br = 320000, timeoutMs = NC_CALL_TIMEOUT_MS) {
   const idList = Array.isArray(ids) ? ids : [ids];
   if (idList.length === 0) return new Map();
   const idStr = idList.join(',');
@@ -65,12 +74,12 @@ async function fetchSongUrls(ids, br = 320000) {
   let data = [];
   try {
     // v1 接口：ids 形如 "[id1,id2]"，用 level 选音质。
-    const r = await call('song_url_v1', { id: idStr, level });
+    const r = await call('song_url_v1', { id: idStr, level }, timeoutMs);
     data = r?.data || [];
   } catch {
     // 回退到旧版接口（br 直传）。
     try {
-      const r = await call('song_url', { id: idStr, br });
+      const r = await call('song_url', { id: idStr, br }, timeoutMs);
       data = r?.data || [];
     } catch { /* 忽略整体失败 */ }
   }
@@ -108,9 +117,9 @@ function mapSong(s) {
   };
 }
 
-async function enrichSongs(songs, br) {
+async function enrichSongs(songs, br, timeoutMs = NC_CALL_TIMEOUT_MS) {
   if (songs.length === 0) return songs;
-  const urls = await fetchSongUrls(songs.map((s) => s.id), br);
+  const urls = await fetchSongUrls(songs.map((s) => s.id), br, timeoutMs);
   return songs.map((s) => {
     const u = urls.get(s.id);
     return u ? { ...s, size: u.size, format: u.format, br: u.br } : s;
@@ -167,13 +176,13 @@ async function searchAlbums(keywords, limit = 60) {
 
 // 歌手的全部歌曲（热门排序，最多 100 首）。
 async function artistSongs(id, limit = 100) {
-  const r = await call('artist_songs', { id, limit, offset: 0, order: 'hot' });
+  const r = await call('artist_songs', { id, limit, offset: 0, order: 'hot' }, NC_DETAIL_TIMEOUT_MS);
   return (r?.songs || []).map(mapSong);
 }
 
 // 专辑的全部歌曲。
 async function albumSongs(id) {
-  const r = await call('album', { id });
+  const r = await call('album', { id }, NC_DETAIL_TIMEOUT_MS);
   return (r?.songs || []).map(mapSong);
 }
 
@@ -192,6 +201,34 @@ export async function probe() {
   } catch (e) {
     const code = (e && e.cause && e.cause.code) || (e && e.code) || '';
     return { ok: false, ms: Date.now() - t0, error: `${code ? code + ': ' : ''}${(e && e.message) || String(e)}` };
+  }
+}
+
+// 详情接口真实探活：真的调一次 playlist_detail（取一个固定公开歌单），量出「在 NAS 上拉整张歌单
+// 元数据」到底要多久 / 会不会超时。注意：搜索探活（cloudsearch，约 60 条）快，不代表详情接口快——
+// 后者返回体大得多（整张歌单数百首），受限网络下耗时可能差一个数量级。用于定位「歌单详情超时」。
+const NC_PROBE_PLAYLIST_ID = process.env.NC_PROBE_PLAYLIST_ID || '3778678'; // 网易云音乐热歌榜（公开稳定）
+export async function probeDetail() {
+  if (!NC) return { ok: false, ms: 0, error: 'NeteaseCloudMusicApi 未加载（依赖缺失）' };
+  const t0 = Date.now();
+  try {
+    const r = await call('playlist_detail', { id: NC_PROBE_PLAYLIST_ID }, NC_DETAIL_TIMEOUT_MS);
+    const pl = r?.playlist;
+    const ms = Date.now() - t0;
+    if (pl) {
+      return {
+        ok: true,
+        ms,
+        tracks: (pl.tracks || []).length,
+        trackIds: (pl.trackIds || []).length,
+        timeoutMs: NC_DETAIL_TIMEOUT_MS,
+        error: null,
+      };
+    }
+    return { ok: false, ms, error: '上游返回但无 playlist 字段（可能被风控 / 需登录）' };
+  } catch (e) {
+    const code = (e && e.cause && e.cause.code) || (e && e.code) || '';
+    return { ok: false, ms: Date.now() - t0, timeoutMs: NC_DETAIL_TIMEOUT_MS, error: `${code ? code + ': ' : ''}${(e && e.message) || String(e)}` };
   }
 }
 
@@ -228,7 +265,7 @@ export const neteaseAdapter = {
     return fetchSongUrls(Array.isArray(ids) ? ids : [ids], 320000);
   },
   async playlistDetail(id) {
-    const r = await call('playlist_detail', { id });
+    const r = await call('playlist_detail', { id }, NC_DETAIL_TIMEOUT_MS);
     const pl = r?.playlist;
     if (!pl) throw new Error('歌单不存在或已下架');
     const songs = (pl.tracks || []).map((t) => ({
@@ -243,7 +280,7 @@ export const neteaseAdapter = {
       format: null,
       br: null,
     }));
-    const enriched = await enrichSongs(songs, 320000);
+    const enriched = await enrichSongs(songs, 320000, NC_DETAIL_TIMEOUT_MS);
     return {
       id: String(id),
       platform: 'netease',

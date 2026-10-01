@@ -147,6 +147,10 @@ export interface DeepHealthProbe {
   status?: number;
   sample?: number;
   total?: number | null;
+  // 歌单详情探活专有：tracks=返回曲目数、trackIds=歌单曲目总数、timeoutMs=该接口的超时上限
+  tracks?: number;
+  trackIds?: number;
+  timeoutMs?: number;
   error?: string | null;
 }
 export interface DeepHealth {
@@ -156,7 +160,7 @@ export interface DeepHealth {
     verdict: string[];
     dns: DeepHealthDns[];
     internet: DeepHealthProbe;
-    adapters: { netease: DeepHealthProbe; solara: DeepHealthProbe };
+    adapters: { netease: DeepHealthProbe; neteaseDetail?: DeepHealthProbe; solara: DeepHealthProbe };
   };
 }
 
