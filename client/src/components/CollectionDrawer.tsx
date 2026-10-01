@@ -135,8 +135,12 @@ export default function CollectionDrawer({
   const total = detail?.totalCount ?? detail?.count ?? songs.length;
   const flacCount = detail?.flacCount ?? songs.filter((s) => s.flac).length;
   const mp3Count = songs.filter((s) => !s.flac && !!s.format).length;
-  const noSource = Math.max(0, total - flacCount - mp3Count);
-  const incomplete = !!detail && songs.length > 0 && flacCount < total;
+  // 待解析（详情整体超时截断，点击播放/下载时再按需解析）与「确认无音源」分开统计，
+  // 避免把「没来得及解析」误显示成「没有音源」。
+  const pendingCount = detail?.pendingCount ?? songs.filter((s) => s.pending).length;
+  const noSource = Math.max(0, total - flacCount - mp3Count - pendingCount);
+  const incomplete = !!detail && songs.length > 0 && (flacCount < total || pendingCount > 0);
+  const error = active?.error;
 
   return (
     <aside
@@ -208,6 +212,17 @@ export default function CollectionDrawer({
 
       <div className="drawer__body">
         {loading && <div className="skeleton sk-row" style={{ height: 96 }} />}
+        {!loading && !detail && error && (
+          <div className="drawer__error">
+            <p className="drawer__error-title">加载失败</p>
+            <p className="drawer__error-msg">{error}</p>
+            {onRetryActive && (
+              <button type="button" className="set-btn set-btn--primary" onClick={onRetryActive}>
+                重试
+              </button>
+            )}
+          </div>
+        )}
         {!loading && detail && (
           <>
             <div className="drawer__hero">
@@ -228,6 +243,7 @@ export default function CollectionDrawer({
                 <span className="drawer__note-text">
                   共 {total} 首：FLAC {flacCount} 首
                   {mp3Count > 0 ? ` · MP3 ${mp3Count} 首` : ''}
+                  {pendingCount > 0 ? ` · 待解析 ${pendingCount} 首（点击播放 / 下载时自动解析）` : ''}
                   {noSource > 0 ? ` · 暂无音源 ${noSource} 首（音源限流或曲库未收录）` : ''}。
                 </span>
                 {onRetryActive && noSource > 0 && (

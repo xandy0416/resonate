@@ -130,19 +130,22 @@ export default function App() {
     const tab = drawerTabsRef.current.find((t) => t.id === id);
     const loader = explicitLoader ?? tab?.loader;
     if (!loader) return;
-    updateTab(id, { loading: true });
+    updateTab(id, { loading: true, error: undefined });
     try {
       const detail = await loader();
       setDrawerTabs((prev) =>
         prev.map((t) =>
           t.id === id
-            ? { ...t, loading: false, detail, title: detail.name || t.title, cover: detail.cover || t.cover }
+            ? { ...t, loading: false, detail, error: undefined, title: detail.name || t.title, cover: detail.cover || t.cover }
             : t
         )
       );
     } catch (e) {
-      updateTab(id, { loading: false });
-      pushToast(e instanceof Error ? e.message : '加载失败', 'error');
+      const msg = e instanceof Error ? e.message : '加载失败';
+      // 保留错误原因到标签：抽屉内显示错误态 + 重试按钮。
+      // （此前只弹一个一闪而过的 toast，detail 始终为 null → 详情区整片空白，用户以为卡死。）
+      updateTab(id, { loading: false, error: msg });
+      pushToast(msg, 'error');
     }
   }
 

@@ -19,6 +19,8 @@ export interface Song {
   flac?: boolean; // 是否为 FLAC 高质量
   fromPlatform?: string; // 发现来源平台（网易云 / 汽水等）
   resolveFailed?: boolean; // 按需解析尝试过且失败（无可用音源）
+  pending?: boolean; // 详情整体超时截断，尚未解析（点击播放 / 下载时再按需解析）
+  reason?: string; // 未解析 / 无音源的原因说明
 }
 
 export interface Playlist {
@@ -78,6 +80,7 @@ export interface CollectionDetail {
   resolvedCount?: number; // 已解析出直链的曲目数（含降级为 MP3 的）
   flacCount?: number; // 其中真正拿到 FLAC 的曲目数
   mp3Count?: number; // 降级为 MP3 的曲目数
+  pendingCount?: number; // 因整体超时尚未解析的曲目数（点击时再按需解析）
   noSrcCount?: number; // 无可用音源的曲目数
   totalCount?: number;
   owner?: string; // 歌单创建者（仅歌单有）
@@ -99,5 +102,6 @@ export interface DrawerTab {
   cover?: string;      // 标签缩略图（加载后填充）
   loading: boolean;
   detail: CollectionDetail | null;
+  error?: string; // 加载失败原因（用于抽屉内显示错误态并重试，而非无声空白）
   loader: () => Promise<CollectionDetail>; // 加载函数，retry 时复用
 }

@@ -484,9 +484,17 @@ const PARSERS = {
   migu: parseMigu,
 };
 
-async function resolveFlacTracks(tracks, fromPlatform, limit = 80) {
+async function resolveFlacTracks(tracks, fromPlatform, limit = 80, deadlineMs = 6000) {
   const pool = tracks.slice(0, limit);
   const out = new Array(pool.length);
+  // 整体截止：详情解析是重活（80 首逐首取直链，本地可达 20s+）。在受限网络 / 外网反代
+  // 场景下极易超过网关超时 → 前端请求失败 → 抽屉整片空白。这里设整体 deadline，
+  // 到点即停，未及解析的曲目保留为「待解析」条目（前端点击播放 / 下载时再按需解析），
+  // 截止 + 尾部在飞请求，总时长约 9s，确保不会拖爆外网反代。
+  const deadline = Date.now() + deadlineMs;
+  // 记录「真正尝试过解析」的曲目，用于区分「待解析」（被 deadline 截断）
+  // 与「已尝试但确认无源」（上游限流 / 曲库未收录）。
+  const attempted = new Set();
 
   // —— 预筛：曲目自带网易云 id 时，先用「一次批量请求」问清哪些 id 真的有音源 ——
   // 大列表（如歌手热门 50~100 首）里常有大量「已下架 / 需 VIP」的曲目，
@@ -502,7 +510,11 @@ async function resolveFlacTracks(tracks, fromPlatform, limit = 80) {
   }
   if (idIdx.length) {
     try {
-      const m = await neteaseAdapter.songUrls(idIdx.map((i) => String(pool[i].id)));
+      // 预筛本身也设短超时（一次批量请求）：避免它单独把详情总时长拖长。
+      const m = await Promise.race([
+        neteaseAdapter.songUrls(idIdx.map((i) => String(pool[i].id))),
+        new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+      ]);
       if (m && typeof m.forEach === 'function') m.forEach((v, k) => neMap.set(String(k), v));
     } catch {
       /* 预筛失败不影响主流程，退化为逐个解析 */
@@ -570,41 +582,60 @@ async function resolveFlacTracks(tracks, fromPlatform, limit = 80) {
     };
   }
 
-  // 第一阶段：适度并发批量解析。
-  // 并发过高会被上游（Solara 跳板）限流，反而导致「整表全灰」，
-  // 因此这里用 6 路；漏掉的部分交给第二阶段补。
-  let idx = 0;
-  const CONC = 6;
-  async function runner() {
-    while (idx < pool.length) {
-      const cur = idx++;
-      const r = await resolveOne(pool[cur]);
-      if (r) out[cur] = hit(pool[cur], r);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(CONC, pool.length || 1) }, () => runner()));
-
-  // 第二阶段：对第一阶段未命中的曲目，低并发（2 路）+ 退避重试一次。
-  // 上游偶发抖动/限流时，这一步能把「整表全灰」救回成「个别失败」。
-  const failed = [];
-  for (let i = 0; i < pool.length; i++) if (!out[i]) failed.push(i);
-  if (failed.length) {
-    let fi = 0;
-    async function retryRunner() {
-      while (fi < failed.length) {
-        const cur = failed[fi++];
-        await new Promise((r) => setTimeout(r, 150 + Math.floor(Math.random() * 200)));
+  // 解析阶段（第一阶段并发 + 第二阶段补漏）与「硬截止」赛跑：
+  // 即便到点时仍有请求在飞，也立即收手返回，保证详情总时长有明确上界，
+  // 不会因个别慢请求（网易云接口硬超时 10s）把外网反代拖超时。
+  const parseStage = (async () => {
+    // 第一阶段：适度并发批量解析。
+    // 并发过高会被上游（Solara 跳板）限流，反而导致「整表全灰」，
+    // 因此这里用 6 路；漏掉的部分交给第二阶段补。
+    let idx = 0;
+    const CONC = 6;
+    async function runner() {
+      while (idx < pool.length) {
+        if (Date.now() > deadline) return; // 到点停止，剩余留作「待解析」
+        const cur = idx++;
         const r = await resolveOne(pool[cur]);
+        attempted.add(pool[cur]); // 标记「已完成尝试」，用于区分待解析 / 确认无源
         if (r) out[cur] = hit(pool[cur], r);
       }
     }
-    await Promise.all(Array.from({ length: Math.min(2, failed.length) }, () => retryRunner()));
-  }
+    await Promise.all(Array.from({ length: Math.min(CONC, pool.length || 1) }, () => runner()));
 
-  // 仍未解析（上游持续限流 / 曲库确实无源）：保留条目并标记，避免列表无声变空。
+    // 第二阶段：对第一阶段未命中的曲目，低并发（2 路）+ 退避重试一次。
+    // 上游偶发抖动/限流时，这一步能把「整表全灰」救回成「个别失败」。
+    const failed = [];
+    // 只重试「已完成尝试但未命中」的（真正失败）；未及尝试的不在此列。
+    for (let i = 0; i < pool.length; i++) if (!out[i] && attempted.has(pool[i])) failed.push(i);
+    if (failed.length && Date.now() < deadline) {
+      let fi = 0;
+      async function retryRunner() {
+        while (fi < failed.length) {
+          if (Date.now() > deadline) return;
+          const cur = failed[fi++];
+          await new Promise((r) => setTimeout(r, 150 + Math.floor(Math.random() * 200)));
+          const r = await resolveOne(pool[cur]);
+          attempted.add(pool[cur]);
+          if (r) out[cur] = hit(pool[cur], r);
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(2, failed.length) }, () => retryRunner()));
+    }
+  })();
+
+  // 硬截止：给在飞请求一点收尾余量（+1.5s），到点无论解析进度如何都返回。
+  await Promise.race([
+    parseStage,
+    new Promise((resolve) => setTimeout(resolve, deadlineMs + 1500)),
+  ]);
+
+  // 仍未解析：保留条目避免列表无声变空，并区分两种情况——
+  //   · pending（未及解析，被 deadline 截断）：前端可点击按需解析；
+  //   · 已尝试但确认无源（上游限流 / 曲库确实未收录）：提示可「重新解析」。
   for (let i = 0; i < pool.length; i++) {
     if (out[i]) continue;
     const t = pool[i];
+    const pending = !attempted.has(t);
     out[i] = {
       id: String(t.id || `t${i}`),
       platform: 'solara',
@@ -619,7 +650,10 @@ async function resolveFlacTracks(tracks, fromPlatform, limit = 80) {
       br: null,
       flac: false,
       resolved: false,
-      reason: '上游音源暂时不可用（限流或未收录），可点「重新解析」',
+      pending,
+      reason: pending
+        ? '待解析（点击播放 / 下载时再取音源）'
+        : '上游音源暂时不可用（限流或未收录），可点「重新解析」',
       fromPlatform,
     };
   }
@@ -640,6 +674,7 @@ async function importPlaylist(rawUrl) {
   const songs = await resolveFlacTracks(parsed.tracks, parsed.platform);
   const resolvedCount = songs.filter((s) => s.resolved).length;
   const flacCount = songs.filter((s) => s.flac).length;
+  const pendingCount = songs.filter((s) => s.pending).length;
   return {
     id: u,
     platform: parsed.platform,
@@ -649,6 +684,7 @@ async function importPlaylist(rawUrl) {
     count: parsed.count || parsed.tracks.length,
     resolvedCount,
     flacCount,
+    pendingCount,
     totalCount: parsed.tracks.length,
     songs,
   };
@@ -685,15 +721,17 @@ export async function getArtistSongs(platform, id, fallbackName = '') {
 function summarize(name, songs, totalRaw, prefix = '共') {
   const flacCount = songs.filter((s) => s.flac).length;
   const mp3Count = songs.filter((s) => s.format && !s.flac).length;
-  const noSrcCount = songs.filter((s) => !s.format).length;
+  const pendingCount = songs.filter((s) => s.pending).length;
+  const noSrcCount = songs.filter((s) => !s.format && !s.pending).length;
   return {
     name: name || '',
     cover: '',
-    subtitle: `${prefix} ${songs.length} 首 · FLAC ${flacCount} · MP3 ${mp3Count} · 暂无音源 ${noSrcCount}`,
+    subtitle: `${prefix} ${songs.length} 首 · FLAC ${flacCount} · MP3 ${mp3Count} · 待解析 ${pendingCount} · 暂无音源 ${noSrcCount}`,
     count: songs.length,
     resolvedCount: songs.filter((s) => s.resolved).length,
     flacCount,
     mp3Count,
+    pendingCount,
     noSrcCount,
     totalCount: totalRaw,
     songs,

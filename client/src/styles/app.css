@@ -852,6 +852,33 @@ a { color: inherit; }
   background: color-mix(in oklch, var(--color-accent) 24%, transparent);
 }
 .drawer__retry:disabled { opacity: 0.5; cursor: default; }
+/* 加载失败态：此前失败只弹一个一闪而过的 toast、详情区整片空白，用户以为卡死；
+   现在在抽屉内明确展示失败原因并提供重试。 */
+.drawer__error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  margin: var(--space-lg) 0;
+  padding: var(--space-md);
+  border: var(--rule-hair) solid color-mix(in oklch, var(--color-error) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-error) 10%, transparent);
+}
+.drawer__error-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.drawer__error-msg {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-muted);
+  word-break: break-word;
+}
 
 .dl-item {
   display: flex; align-items: center; gap: var(--space-sm);
