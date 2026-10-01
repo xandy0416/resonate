@@ -671,7 +671,10 @@ async function importPlaylist(rawUrl) {
   const parser = PARSERS[platform];
   if (!parser) throw new Error(`暂不支持解析 ${platform} 平台的歌单。`);
   const parsed = await parser(u);
-  const songs = await resolveFlacTracks(parsed.tracks, parsed.platform);
+  // 歌单曲目通常几十到数百首，详情阶段仍受 6s 截止约束（避免外网反代超时），
+  // 超出的曲目标记为「待解析」，点击播放 / 下载时再按需补解析，故这里放宽上限到 200，
+  // 让整张歌单都可见、可下载，而不被静默截断。
+  const songs = await resolveFlacTracks(parsed.tracks, parsed.platform, PLAYLIST_TRACK_LIMIT);
   const resolvedCount = songs.filter((s) => s.resolved).length;
   const flacCount = songs.filter((s) => s.flac).length;
   const pendingCount = songs.filter((s) => s.pending).length;
@@ -693,6 +696,9 @@ async function importPlaylist(rawUrl) {
 // 数量上限：控制单次解析耗时（歌手热门曲目可达上百首）
 const ARTIST_TRACK_LIMIT = 50;
 const ALBUM_TRACK_LIMIT = 100;
+// 歌单：放宽到 200，超出部分在详情阶段标记为「待解析」、下载时按需补解析，
+// 避免大歌单被静默截断（详情整体仍有 6s 截止保护，不会拖爆外网反代）。
+const PLAYLIST_TRACK_LIMIT = 200;
 
 // —— 歌手 / 专辑详情：拉取该歌手/专辑的曲目，再统一解析为 FLAC ——
 // 平台路由：目前歌手/专辑由网易云提供（搜索即网易云来源），其余平台暂返回空。

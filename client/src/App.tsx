@@ -261,11 +261,17 @@ export default function App() {
     }
   }
 
-  // 并发受限地按需解析一批曲目（用于批量下载），整体 12s 时限避免长尾拖死。
-  async function resolveManyOnDemand(items: Song[], concurrency: number): Promise<Song[]> {
+  // 并发受限地按需解析一批曲目（用于批量下载），整体时限避免长尾拖死。
+  // 默认 20s：歌单较大时（80 首、外网到 Solara 偏慢）需给足预算，否则未及解析的会残留为「待解析」、
+  // 在下载时被跳过，造成「下了一部分还剩待解析」的观感。
+  async function resolveManyOnDemand(
+    items: Song[],
+    concurrency: number,
+    deadlineMs = 20000
+  ): Promise<Song[]> {
     const out: Song[] = [];
     let idx = 0;
-    const deadline = Date.now() + 12000;
+    const deadline = Date.now() + deadlineMs;
     async function runner() {
       while (idx < items.length) {
         if (Date.now() > deadline) return;
@@ -384,7 +390,7 @@ export default function App() {
     setDownloads((d) => [
       { id: key, title: s.title || '音频', status: '下载中' as const, at: Date.now(), songId: s.id },
       ...d,
-    ].slice(0, 50));
+    ].slice(0, 200));
     pushToast(`已开始下载：${s.title || '音频'}`);
     setTimeout(() => {
       setDownloadingIds((prev) => {
@@ -403,7 +409,9 @@ export default function App() {
     const toResolve = songs.filter((s) => !s.format && !s.resolveFailed);
     if (toResolve.length) {
       pushToast(`正在解析 ${toResolve.length} 首音源…`);
-      const resolved = await resolveManyOnDemand(toResolve, 12);
+      // 下载场景给足预算（90s + 20 并发）：单首上限 6s，20 并发可覆盖整张歌单，
+      // 把详情阶段因 6s 截止留下的「待解析」全部补完，不再残留被跳过。
+      const resolved = await resolveManyOnDemand(toResolve, 20, 90000);
       const map = new Map(resolved.map((r) => [r.id, r]));
       list = songs.map((s) => {
         if (s.format) return s;
@@ -412,9 +420,14 @@ export default function App() {
       });
     }
     const available = list.filter((s) => !!s.format);
+    // 经过上面一轮按需解析后，仍没有音源（被时限截断 / 上游确实未收录）的待解析曲目数。
+    const unresolved = list.filter((s) => !s.format && toResolve.some((t) => t.id === s.id)).length;
     if (available.length === 0) {
       pushToast('所选曲目暂无可下载音源', 'error');
       return;
+    }
+    if (unresolved > 0) {
+      pushToast(`${unresolved} 首暂未解析到音源（外网偏慢或曲库未收录），将跳过，可稍后重试`, 'error');
     }
     if (downloadMode === 'nas') {
       await nasSaveMany(available);
@@ -432,7 +445,7 @@ export default function App() {
         songId: s.id,
       })),
       ...d,
-    ].slice(0, 50));
+    ].slice(0, 200));
     pushToast(`已开始下载 ${available.length} 首（若浏览器询问，请允许批量下载）`, 'ok');
     available.forEach((s, i) => {
       setTimeout(() => triggerOneDownload(s), i * 250);
@@ -473,7 +486,7 @@ export default function App() {
     setDownloads((d) => [
       { id: key, title: s.title || '音频', status: '下载中' as const, at: Date.now(), songId: s.id },
       ...d,
-    ].slice(0, 50));
+    ].slice(0, 200));
     pushToast(`正在保存到 NAS：${s.title || '音频'}`);
     const r = await saveSong(s.platform, s.id, s.title || '音频', artist, s.src);
     setDownloadingIds((prev) => {
@@ -518,7 +531,7 @@ export default function App() {
         songId: s.id,
       })),
       ...d,
-    ].slice(0, 50));
+    ].slice(0, 200));
     pushToast(`正在向 NAS 保存 ${songs.length} 首…`);
     let saved = 0;
     let skipped = 0;
