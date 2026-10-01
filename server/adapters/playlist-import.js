@@ -298,9 +298,15 @@ function extractMiguId(url) {
 }
 
 // 咪咕歌单详情：直连官方公开接口 queryMusicListSongs.do（免登录）。
-// 该接口只返回曲目列表（songName / singer / album / albumImgs），不含歌单名称，
+// ⚠️ 该接口**忽略 pageSize 且单页硬上限为 50**（实测 pageSize=100 也只回 50），
+// 必须按 pageNo 翻页取全，否则会出现「歌单 172 首、却只列出 50 首」的数量不符。
+// 接口只返回曲目列表（songName / singer / album / albumImgs），不含歌单名称，
 // 歌单名以兜底名呈现；下载仍统一走 Solara 按名解析为 FLAC。
 // 咪咕时长字段为字符串 "MM:SS" 或 "HH:MM:SS"，需按冒号解析为毫秒。
+const MIGU_SONGS_API =
+  'https://app.c.nf.migu.cn/MIGUM3.0/v1.0/user/queryMusicListSongs.do';
+const MIGU_PAGE_SIZE = 50; // 接口单页硬上限（传更大也无效）
+
 function parseColonDuration(str) {
   if (!str || typeof str !== 'string') return 0;
   const parts = str.split(':').map((x) => Number(x) || 0);
@@ -314,14 +320,35 @@ function parseColonDuration(str) {
 async function parseMigu(url) {
   const id = extractMiguId(url);
   if (!id) throw new Error('无法从链接中识别咪咕歌单 ID。');
-  const data = await fetchMiguJson(
-    'https://app.c.nf.migu.cn/MIGUM3.0/v1.0/user/queryMusicListSongs.do',
-    { musicListId: id, pageNo: '1', pageSize: '100' }
-  );
-  const list = (data && data.list) || [];
+
+  const fetchPage = (pageNo) =>
+    fetchMiguJson(MIGU_SONGS_API, {
+      musicListId: id,
+      pageNo: String(pageNo),
+      pageSize: String(MIGU_PAGE_SIZE),
+    });
+
+  const first = await fetchPage(1);
+  let list = (first && first.list) || [];
   if (!list.length) {
     throw new Error('咪咕歌单未解析到曲目（可能该歌单不存在或已下架）。');
   }
+  // totalCount 为歌单真实曲目总数；据此算出总页数并补齐（第 1 页已顺手拿到封面等元数据）。
+  const total = Number((first && first.totalCount) || list.length) || list.length;
+  const cap = Math.min(total, PLAYLIST_TRACK_LIMIT); // 与全局曲目上限一致，避免超大歌单拖垮详情
+  const pageCount = Math.ceil(cap / MIGU_PAGE_SIZE);
+  if (pageCount > 1) {
+    // 剩余页并发拉取；单页失败只跳过该页，不因个别抖动让整单失败。
+    const rest = await Promise.all(
+      Array.from({ length: pageCount - 1 }, (_, k) =>
+        fetchPage(k + 2).catch(() => null)
+      )
+    );
+    for (const r of rest) {
+      if (r && Array.isArray(r.list) && r.list.length) list = list.concat(r.list);
+    }
+  }
+  list = list.slice(0, cap);
   // 用首曲封面作为歌单封面兜底（接口本身不返回歌单封面）。
   const cover =
     (list[0].albumImgs && list[0].albumImgs[0] && list[0].albumImgs[0].img) || '';
@@ -330,7 +357,7 @@ async function parseMigu(url) {
     name: '咪咕歌单',
     owner: '—',
     cover,
-    count: Number(data.totalCount || list.length),
+    count: total,
     tracks: list.map((s) => ({
       title: s.songName || '',
       artist: (s.singer || '').split('|').filter(Boolean).join('/'),
@@ -672,8 +699,9 @@ async function importPlaylist(rawUrl) {
   if (!parser) throw new Error(`暂不支持解析 ${platform} 平台的歌单。`);
   const parsed = await parser(u);
   // 歌单曲目通常几十到数百首，详情阶段仍受 6s 截止约束（避免外网反代超时），
-  // 超出的曲目标记为「待解析」，点击播放 / 下载时再按需补解析，故这里放宽上限到 200，
-  // 让整张歌单都可见、可下载，而不被静默截断。
+  // 超过截止未解析的曲目标记为「待解析」，点击播放 / 下载时再按需补解析，
+  // 故这里把上限放宽到 500，让整张歌单都可见、可下载，而不被静默截断
+  // （待解析条目不产生额外请求，详情耗时与数量无关）。
   const songs = await resolveFlacTracks(parsed.tracks, parsed.platform, PLAYLIST_TRACK_LIMIT);
   const resolvedCount = songs.filter((s) => s.resolved).length;
   const flacCount = songs.filter((s) => s.flac).length;
@@ -696,9 +724,10 @@ async function importPlaylist(rawUrl) {
 // 数量上限：控制单次解析耗时（歌手热门曲目可达上百首）
 const ARTIST_TRACK_LIMIT = 100;
 const ALBUM_TRACK_LIMIT = 100;
-// 歌单：放宽到 200，超出部分在详情阶段标记为「待解析」、下载时按需补解析，
-// 避免大歌单被静默截断（详情整体仍有 6s 截止保护，不会拖爆外网反代）。
-const PLAYLIST_TRACK_LIMIT = 200;
+// 歌单：放宽到 500，超出部分在详情阶段标记为「待解析」、下载时按需补解析，
+// 避免大歌单被静默截断（详情整体仍有 6s 截止保护，不会拖爆外网反代；
+// 待解析条目只占列表位置，不产生额外上游请求，故放宽不增加详情耗时）。
+const PLAYLIST_TRACK_LIMIT = 500;
 
 // —— 歌手 / 专辑详情：拉取该歌手/专辑的曲目，再统一解析为 FLAC ——
 // 平台路由：目前歌手/专辑由网易云提供（搜索即网易云来源），其余平台暂返回空。
